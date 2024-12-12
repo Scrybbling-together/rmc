@@ -9,7 +9,6 @@
   outputs = { self, nixpkgs, flake-utils }: 
     flake-utils.lib.eachDefaultSystem (system: 
       let
-        pythonEnv = pkgs.python312.withPackages (ps: []);
         pkgs = import nixpkgs {
           inherit system;
         };
@@ -25,6 +24,10 @@
 	  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
 	    pkgs.sqlite.out
 	  ];
+
+	  shellHook = ''
+	    source ./.venv/bin/activate
+	  '';
         };
       });
 }
