@@ -16,18 +16,18 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-	    sqlite.dev
-	    poetry
-	    inkscape
+	        sqlite.dev
+	        poetry
+	        inkscape
           ];
 
-	  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-	    pkgs.sqlite.out
-	  ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.sqlite.out
+          ];
 
-	  shellHook = ''
-	    source ./.venv/bin/activate
-	  '';
+          shellHook = ''
+            source ./.venv/bin/activate
+          '';
         };
       });
 }
