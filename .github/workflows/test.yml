@@ -23,6 +23,9 @@ jobs:
         brew install cairo libxml2 libffi
         echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
         echo "DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+    - name: Install Windows dependencies
+      if: matrix.os == 'windows-latest'
+      run: choco install cairo --yes
     - name: Install poetry
       run: pipx install poetry
     - name: Setup Python ${{ matrix.python-version }}
