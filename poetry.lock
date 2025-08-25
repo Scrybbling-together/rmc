@@ -2,13 +2,13 @@
 
 [[package]]
 name = "click"
-version = "8.1.7"
+version = "8.1.8"
 description = "Composable command line interface toolkit"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "click-8.1.7-py3-none-any.whl", hash = "sha256:ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28"},
-    {file = "click-8.1.7.tar.gz", hash = "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de"},
+    {file = "click-8.1.8-py3-none-any.whl", hash = "sha256:63c132bbbed01578a06712a2d1f497bb62d9c1c0d329b7903a866228027263b2"},
+    {file = "click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a"},
 ]
 
 [package.dependencies]
@@ -41,13 +41,13 @@ test = ["pytest (>=6)"]
 
 [[package]]
 name = "iniconfig"
-version = "2.0.0"
+version = "2.1.0"
 description = "brain-dead simple config-ini parsing"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "iniconfig-2.0.0-py3-none-any.whl", hash = "sha256:b6a85871a79d2e3b22d2d1b94ac2824226a63c6b741c88f7ae975f18b6778374"},
-    {file = "iniconfig-2.0.0.tar.gz", hash = "sha256:2d91e135bf72d31a410b17c16da610a82cb55f6b0477d1a902134b24a455b8b3"},
+    {file = "iniconfig-2.1.0-py3-none-any.whl", hash = "sha256:9deba5723312380e77435581c6bf4935c94cbfab9b1ed33ef8d238ea168eb760"},
+    {file = "iniconfig-2.1.0.tar.gz", hash = "sha256:3abbd2e30b36733fee78f9c7f7308f2d0050e88f0087fd25c2645f63c773e1c7"},
 ]
 
 [[package]]
@@ -100,13 +100,13 @@ testing = ["argcomplete", "attrs (>=19.2.0)", "hypothesis (>=3.56)", "mock", "no
 
 [[package]]
 name = "rmscene"
-version = "0.6.1"
+version = "0.7.0"
 description = "Read v6 .rm files from the reMarkable tablet"
 optional = false
 python-versions = "<4.0,>=3.10"
 files = [
-    {file = "rmscene-0.6.1-py3-none-any.whl", hash = "sha256:9cd50ae8eede26e3263d78102db880644d39dcc6a5376d38627c060e47bf9045"},
-    {file = "rmscene-0.6.1.tar.gz", hash = "sha256:82f7797bdfa407f9ad27245e7333a7c6e81f8da3390a4f9d9d89736643fe163c"},
+    {file = "rmscene-0.7.0-py3-none-any.whl", hash = "sha256:10a271ddda9d407ae0c33e8c91e7269e51d5e34a6861f6cf98dca608bffdbbe1"},
+    {file = "rmscene-0.7.0.tar.gz", hash = "sha256:1e321f197b4a79b946bba1c17532f9fe7bd3f7343c216a8db8a8197925a5b9d1"},
 ]
 
 [package.dependencies]
@@ -156,4 +156,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "89300f7c0755c959ecf73ddc93b01d4528f11a86a072e4f384e9626329136aee"
+content-hash = "42fbb4de421ea7fa1f0bf638451545e3d05741e2fa58e79727ee1d0c95118621"
