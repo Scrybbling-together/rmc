@@ -14,7 +14,7 @@ from rmscene import scene_items as si
 from rmscene.text import TextDocument
 from xml.etree.ElementTree import _escape_attrib
 
-from .writing_tools import Pen
+from .writing_tools import Pen, RM_PALETTE
 
 _logger = logging.getLogger(__name__)
 
@@ -104,6 +104,15 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
 
     draw_group(tree.root, output, anchor_pos)
 
+    # Smart highlights
+    # We set the opacity on the outside, to not show overlapping highlights
+    output.write('\t<g id="highlights" style="opacity:0.3">\n')
+    for item in tree.walk():
+        if isinstance(item, si.GlyphRange):
+            for rect in item.rectangles:
+                output.write(f'\t\t<rect x="{xx(rect.x)}" y="{yy(rect.y)}" width="{scale(rect.w)}" height="{scale(rect.h)}" fill="rgb{RM_PALETTE[item.color]}"/>\n')
+    output.write('\t</g>\n')
+    
     # Closing page group
     output.write('\t</g>\n')
     # END notebook
