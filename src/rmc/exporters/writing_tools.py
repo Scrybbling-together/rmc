@@ -118,7 +118,7 @@ class Pen:
             return MechanicalPencil(width, color_id)
         # Highlighter
         elif pen_nr in (PenType.HIGHLIGHTER_1, PenType.HIGHLIGHTER_2):
-            width = 15
+            width = 20
             return Highlighter(width, color_id)
         elif pen_nr == PenType.SHADER:
             # TODO: check if this is correct
