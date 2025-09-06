@@ -118,7 +118,7 @@ class Pen:
             return MechanicalPencil(width, color_id)
         # Highlighter
         elif pen_nr in (PenType.HIGHLIGHTER_1, PenType.HIGHLIGHTER_2):
-            width = 15
+            width = 25
             return Highlighter(width, color_id)
         elif pen_nr == PenType.SHADER:
             # TODO: check if this is correct
@@ -237,8 +237,8 @@ class Highlighter(Pen):
     def __init__(self, base_width, base_color_id):
         super().__init__("Highlighter", base_width, base_color_id)
         self.stroke_linecap = "square"
-        # self.base_opacity = 0.3
-        # self.stroke_opacity = 0.2
+        self.base_opacity = 0.3
+        self.stroke_opacity = 0.3
 
 
 class Shader(Pen):

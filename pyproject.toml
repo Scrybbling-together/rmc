@@ -8,7 +8,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-rmscene = { git = "https://github.com/scrybbling-together/rmscene.git", branch = "main" }
+rmscene = { git = "https://github.com/scrybbling-together/rmscene.git", branch = "GlyphRange-colors" }
 click = "^8.0"
 cairosvg = "^2.8.2"
 
