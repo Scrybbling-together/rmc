@@ -402,7 +402,7 @@ packaging = "^23.0"
 type = "git"
 url = "https://github.com/scrybbling-together/rmscene.git"
 reference = "main"
-resolved_reference = "17cc5884fddaeecfb3ebf8973f0f6dcff1deb9a8"
+resolved_reference = "6d063ab8d23c3ad61862c20bfd166bb96655567d"
 
 [[package]]
 name = "tinycss2"
