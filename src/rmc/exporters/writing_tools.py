@@ -238,7 +238,7 @@ class Highlighter(Pen):
         super().__init__("Highlighter", base_width, base_color_id)
         self.stroke_linecap = "square"
         self.base_opacity = 0.3
-        self.stroke_opacity = 0.2
+        self.stroke_opacity = 0.3
 
 
 class Shader(Pen):
