@@ -149,23 +149,6 @@ class Ballpoint(Pen):
         segment_width = (0.5 + pressure / 255) + (width / 4) - 0.5 * ((speed / 4) / 50)
         return segment_width
 
-    def get_segment_color(self, speed, direction, width, pressure, last_width):
-        intensity = (0.1 * -((speed / 4) / 35)) + (1.2 * pressure / 255) + 0.5
-        intensity = clamp(intensity)
-        # Apply intensity to the base color while preserving the original color
-        segment_color = (
-            int(intensity * self.base_color[0]),
-            int(intensity * self.base_color[1]),
-            int(intensity * self.base_color[2]),
-        )
-        return "rgb" + str(segment_color)
-
-    # def get_segment_opacity(self, speed, direction, width, pressure, last_width):
-    #     segment_opacity = (0.2 * - ((speed / 4) / 35)) + (0.8 * pressure / 255)
-    #     segment_opacity *= segment_opacity
-    #     segment_opacity = self.clamp(segment_opacity)
-    #     return segment_opacity
-
 
 class Marker(Pen):
     def __init__(self, base_width, base_color_id):
@@ -221,17 +204,6 @@ class Brush(Pen):
             - ((speed / 4) / 50)
         )  # + (0.2 * last_width)
         return segment_width
-
-    def get_segment_color(self, speed, direction, width, pressure, last_width):
-        intensity = ((pressure / 255) ** 1.5 - 0.2 * ((speed / 4) / 50)) * 1.5
-        intensity = clamp(intensity)
-        # Apply intensity to the base color while preserving the original color
-        segment_color = (
-            int(intensity * self.base_color[0]),
-            int(intensity * self.base_color[1]),
-            int(intensity * self.base_color[2]),
-        )
-        return "rgb" + str(segment_color)
 
 
 class Highlighter(Pen):
