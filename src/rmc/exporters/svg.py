@@ -9,6 +9,7 @@ import string
 import typing as tp
 from pathlib import Path
 
+from rmscene.scene_items import Pen as PenType
 from rmscene import CrdtId, SceneTree, read_tree
 from rmscene import scene_items as si
 from rmscene.text import TextDocument

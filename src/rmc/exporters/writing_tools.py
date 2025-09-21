@@ -6,6 +6,7 @@ Code originally from https://github.com/lschwetlick/maxio through https://github
 
 import logging
 import math
+import sys
 
 from rmscene.scene_items import HARDCODED_COLORMAP, PenColor
 from rmscene.scene_items import Pen as PenType
@@ -151,10 +152,13 @@ class Ballpoint(Pen):
     def get_segment_color(self, speed, direction, width, pressure, last_width):
         intensity = (0.1 * -((speed / 4) / 35)) + (1.2 * pressure / 255) + 0.5
         intensity = clamp(intensity)
-        # using segment color not opacity because the dots interfere with each other.
-        # Color must be 255 rgb
-        segment_color = [min(int(abs(intensity - 1) * 255), 60)] * 3
-        return "rgb" + str(tuple(segment_color))
+        # Apply intensity to the base color while preserving the original color
+        segment_color = (
+            int(intensity * self.base_color[0]),
+            int(intensity * self.base_color[1]),
+            int(intensity * self.base_color[2]),
+        )
+        return "rgb" + str(segment_color)
 
     # def get_segment_opacity(self, speed, direction, width, pressure, last_width):
     #     segment_opacity = (0.2 * - ((speed / 4) / 35)) + (0.8 * pressure / 255)
@@ -221,16 +225,13 @@ class Brush(Pen):
     def get_segment_color(self, speed, direction, width, pressure, last_width):
         intensity = ((pressure / 255) ** 1.5 - 0.2 * ((speed / 4) / 50)) * 1.5
         intensity = clamp(intensity)
-        # using segment color not opacity because the dots interfere with each other.
-        # Color must be 255 rgb
-        rev_intensity = abs(intensity - 1)
-        segment_color = [
-            int(rev_intensity * (255 - self.base_color[0])),
-            int(rev_intensity * (255 - self.base_color[1])),
-            int(rev_intensity * (255 - self.base_color[2])),
-        ]
-
-        return "rgb" + str(tuple(segment_color))
+        # Apply intensity to the base color while preserving the original color
+        segment_color = (
+            int(intensity * self.base_color[0]),
+            int(intensity * self.base_color[1]),
+            int(intensity * self.base_color[2]),
+        )
+        return "rgb" + str(segment_color)
 
 
 class Highlighter(Pen):
