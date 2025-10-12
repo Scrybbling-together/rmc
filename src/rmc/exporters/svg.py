@@ -214,13 +214,13 @@ def draw_stroke(item: si.Line, output):
     last_ypos = -1.
     last_segment_width = segment_width = 0
     # Iterate through the point to form a polyline
-    for point_id, point in enumerate(item.points):
+    for point_idx, point in enumerate(item.points):
         # align the original position
         xpos = point.x
         ypos = point.y
-        if point_id % pen.segment_length == 0:
+        if point_idx % pen.segment_length == 0:
             # if there was a previous segment, end it
-            if last_xpos != -1.:
+            if point_idx > 0:
                 output.write('"/>\n')
 
             segment_color = pen.get_segment_color(point.speed, point.direction, point.width, point.pressure,
@@ -235,7 +235,7 @@ def draw_stroke(item: si.Line, output):
                          f'stroke-width:{scale(segment_width):.3f}; opacity:{segment_opacity}" ')
             output.write(f'stroke-linecap="{pen.stroke_linecap}" ')
             output.write('points="')
-            if last_xpos != -1.:
+            if point_idx > 0:
                 # Join to previous segment
                 output.write(f'{xx(last_xpos):.3f},{yy(last_ypos):.3f} ')
         # store the last position
