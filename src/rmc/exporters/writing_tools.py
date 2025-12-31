@@ -119,7 +119,7 @@ class Pen:
             return MechanicalPencil(width, color_id)
         # Highlighter
         elif pen_nr in (PenType.HIGHLIGHTER_1, PenType.HIGHLIGHTER_2):
-            width = 25
+            width = 30
             return Highlighter(width, color_id)
         elif pen_nr == PenType.SHADER:
             # TODO: check if this is correct
@@ -146,7 +146,7 @@ class Ballpoint(Pen):
         self.segment_length = 5
 
     def get_segment_width(self, speed, direction, width, pressure, last_width):
-        segment_width = (0.5 + pressure / 255) + (width / 4) - 0.5 * ((speed / 4) / 50)
+        segment_width = (0.5 + pressure / 255) + (width / 6.5) - 0.5 * ((speed / 4) / 50)
         return segment_width
 
 
@@ -199,7 +199,7 @@ class Brush(Pen):
 
     def get_segment_width(self, speed, direction, width, pressure, last_width):
         segment_width = 0.7 * (
-            ((1 + (1.4 * pressure / 255)) * (width / 4))
+            ((1 + (1.4 * pressure / 255)) * (width / 7))
             - (0.5 * self.direction_to_tilt(direction))
             - ((speed / 4) / 50)
         )  # + (0.2 * last_width)
@@ -210,8 +210,8 @@ class Highlighter(Pen):
     def __init__(self, base_width, base_color_id):
         super().__init__("Highlighter", base_width, base_color_id)
         self.stroke_linecap = "square"
-        self.base_opacity = 0.3
-        self.stroke_opacity = 0.3
+        self.base_opacity = 0.6
+        self.stroke_opacity = 0.6
 
 
 class Shader(Pen):
@@ -243,7 +243,7 @@ class Calligraphy(Pen):
 
     def get_segment_width(self, speed, direction, width, pressure, last_width):
         segment_width = 0.9 * (
-            ((1 + pressure / 255) * (width / 4))
-            - 0.3 * self.direction_to_tilt(direction)
+            ((1 + pressure / 255) * (width / 7))
+            - 0.1 * self.direction_to_tilt(direction)
         ) + (0.1 * last_width)
         return segment_width
