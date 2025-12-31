@@ -23,6 +23,9 @@ SCREEN_WIDTH = 1404
 SCREEN_HEIGHT = 1872
 SCREEN_DPI = 226
 
+TEXT_DOCUMENT_TOP_Y_CRDT_ID = 0xfffffffffffe
+TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID = 0xffffffffffff
+
 SCALE = 72.0 / SCREEN_DPI
 
 PAGE_WIDTH_PT = SCREEN_WIDTH * SCALE
@@ -113,26 +116,39 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
 
 def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Dict[CrdtId, int]:
     """
-    Find the anchor pos
+    Find the anchor positions for every text node, including special top and
+    bottom of text anchors.
 
     :param text: the root text of the remarkable file
     """
-    # Special anchors adjusted based on pen_size_test.strokes.rm
+    # Start with placeholder values for special anchors - will be updated below
     anchor_pos = {
-        CrdtId(0, 281474976710654): 100,
-        CrdtId(0, 281474976710655): 100,
+        CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID): 100,
+        CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID): 100,
     }
 
     if text is not None:
         # Save anchor from text
+        # The anchor position should match where text is drawn (at baseline),
+        # so we add line height BEFORE storing the position (same as draw_text)
         doc = TextDocument.from_scene_item(text)
-        ypos = text.pos_y + TEXT_TOP_Y
+        y_offset = TEXT_TOP_Y
         for i, p in enumerate(doc.contents):
+            # Add line height first (to match draw_text behavior)
+            y_offset += LINE_HEIGHTS.get(p.style.value, 70)
+            ypos = text.pos_y + y_offset
             anchor_pos[p.start_id] = ypos
             for subp in p.contents:
                 for k in subp.i:
                     anchor_pos[k] = ypos  # TODO check these anchor are used
-            ypos += LINE_HEIGHTS.get(p.style.value, 70)
+ 
+        # Update special anchors to align with text positions:
+        # - TEXT_DOCUMENT_TOP_Y_CRDT_ID -> first text baseline
+        # - TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID -> last text baseline
+        if doc.contents:
+            first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
+            anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
+            anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + y_offset  # last position
 
     return anchor_pos
 
@@ -277,9 +293,10 @@ def draw_text(text: si.Text, output):
         xpos = text.pos_x
         ypos = text.pos_y + y_offset
         cls = p.style.value.name.lower()
-        if str(p):
+        content = str(p)
+        if content.strip():
             # TODO: this doesn't take into account the CrdtStr.properties (font-weight/font-style)
             if _logger.root.level == logging.DEBUG:
                 output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} -->\n')
-            output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(ypos)}" class="{cls}">{_escape_attrib(str(p).strip())}</text>\n')
+            output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(content)}</text>\n')
     output.write('\t\t</g>\n')
