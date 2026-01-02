@@ -61,6 +61,20 @@ LINE_HEIGHTS = {
     # line, but there is still something a bit odd going on here.
 }
 
+# Soft line heights for LINE_SEPARATOR (U+2028) breaks within paragraphs
+# These are tighter than paragraph breaks
+soft_base = 60
+small_soft_base = 40
+SOFT_LINE_HEIGHTS = {
+    si.ParagraphStyle.PLAIN: soft_base,
+    si.ParagraphStyle.BULLET: small_soft_base,
+    si.ParagraphStyle.BULLET2: small_soft_base,
+    si.ParagraphStyle.BOLD: small_soft_base,
+    si.ParagraphStyle.HEADING: soft_base,
+    si.ParagraphStyle.CHECKBOX: small_soft_base,
+    si.ParagraphStyle.CHECKBOX_CHECKED: small_soft_base,
+}
+
 SVG_HEADER = string.Template("""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" height="$height" width="$width" viewBox="$viewbox">""")
 
@@ -83,6 +97,8 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
     
     :return: x_min, x_max, y_min, y_max in screen units
     """
+    LINE_SEPARATOR = '\u2028'
+    
     if text is None:
         return (0, 0, 0, 0)
     
@@ -96,6 +112,14 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
     for p in doc.contents:
         y_offset += LINE_HEIGHTS.get(p.style.value, 70)
         y_positions.append(text.pos_y + y_offset)
+        
+        # Account for soft line breaks
+        content = str(p)
+        num_soft_breaks = content.count(LINE_SEPARATOR)
+        if num_soft_breaks > 0:
+            soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
+            y_offset += num_soft_breaks * soft_line_height
+            y_positions.append(text.pos_y + y_offset)
     
     # Text starts at pos_x and extends to pos_x + width
     x_min = text.pos_x
@@ -166,6 +190,8 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
         - anchor_pos maps CrdtId -> y position
         - newline_offsets maps newline CrdtIds -> offset to subtract (one line height)
     """
+    LINE_SEPARATOR = '\u2028'
+    
     # Start with placeholder values for special anchors - will be updated below
     anchor_pos = {
         CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID): 100,
@@ -181,10 +207,12 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
     if text is not None:
         doc = TextDocument.from_scene_item(text)
         y_offset = TEXT_TOP_Y
+        last_content_y_offset = TEXT_TOP_Y  # Track last paragraph with actual content
         
         for i, p in enumerate(doc.contents):
             # Add line height first (to match draw_text behavior)
             line_height = LINE_HEIGHTS.get(p.style.value, 70)
+            soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += line_height
             ypos = text.pos_y + y_offset
             
@@ -196,18 +224,37 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
             if i > 0:
                 newline_offsets[p.start_id] = line_height
             
-            # Characters in this paragraph get this paragraph's position
+            # Characters in this paragraph get positions, tracking soft line breaks
+            current_soft_offset = 0
             for subp in p.contents:
-                for k in subp.i:
-                    anchor_pos[k] = ypos
+                for j, k in enumerate(subp.i):
+                    anchor_pos[k] = ypos + current_soft_offset
+                    
+                    # Check if this character is a LINE_SEPARATOR
+                    char = subp.s[j] if j < len(subp.s) else ''
+                    if char == LINE_SEPARATOR:
+                        current_soft_offset += soft_line_height
+            
+            # Account for soft line breaks in y_offset for next paragraph
+            content = str(p)
+            num_soft_breaks = content.count(LINE_SEPARATOR)
+            if num_soft_breaks > 0:
+                y_offset += num_soft_breaks * soft_line_height
+            
+            # Track the y_offset after paragraphs with actual visible content
+            # (non-empty after stripping whitespace and LINE_SEPARATOR)
+            visible_content = content.replace(LINE_SEPARATOR, '').strip()
+            if visible_content:
+                last_content_y_offset = y_offset
  
         # Update special anchors to align with text positions:
         # - TEXT_DOCUMENT_TOP_Y_CRDT_ID -> first text baseline
-        # - TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID -> last text baseline
+        # - TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID -> last paragraph with visible content
         if doc.contents:
             first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
-            anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + y_offset  # last position
+            # Use last_content_y_offset instead of y_offset to ignore trailing empty paragraphs
+            anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + last_content_y_offset
 
     return anchor_pos, newline_offsets
 
@@ -370,19 +417,39 @@ def draw_text(text: si.Text, output):
             </style>
 ''')
 
+    # LINE SEPARATOR character used by reMarkable for soft line breaks within paragraphs
+    LINE_SEPARATOR = '\u2028'
+
     y_offset = TEXT_TOP_Y
 
     doc = TextDocument.from_scene_item(text)
     for p in doc.contents:
-        y_offset += LINE_HEIGHTS.get(p.style.value, 70)
+        line_height = LINE_HEIGHTS.get(p.style.value, 70)
+        soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
+        y_offset += line_height
 
         xpos = text.pos_x
         ypos = text.pos_y + y_offset
         cls = p.style.value.name.lower()
         content = str(p)
-        if content.strip():
-            # TODO: this doesn't take into account the CrdtStr.properties (font-weight/font-style)
-            if _logger.root.level == logging.DEBUG:
-                output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} -->\n')
-            output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(content)}</text>\n')
+        
+        # Split content by LINE SEPARATOR and render each part on its own line
+        # Track the line offset based on LINE_SEP count, not split index
+        lines = content.split(LINE_SEPARATOR)
+        line_offset = 0  # How many soft line heights to add
+        for line_content in lines:
+            if line_content.strip():
+                # TODO: this doesn't take into account the CrdtStr.properties (font-weight/font-style)
+                if _logger.root.level == logging.DEBUG:
+                    output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} offset {line_offset} -->\n')
+                line_ypos = ypos + (line_offset * soft_line_height)
+                output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(line_ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(line_content)}</text>\n')
+            # Every LINE_SEPARATOR adds a line offset (whether or not there's content)
+            line_offset += 1
+        
+        # Account for extra lines from LINE_SEPARATOR in the y_offset for subsequent paragraphs
+        extra_lines = len(lines) - 1  # Number of LINE_SEPARATORs
+        if extra_lines > 0:
+            y_offset += extra_lines * soft_line_height
+    
     output.write('\t\t</g>\n')
