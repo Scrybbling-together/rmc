@@ -42,23 +42,21 @@ xx = scale
 yy = scale
 
 TEXT_TOP_Y = -88
+base = 69.5
 LINE_HEIGHTS = {
-    # Based on a rm file having 4 anchors based on the line height I was able to find a value of
-    # 69.5, but decided on 70 (to keep integer values)
-    si.ParagraphStyle.PLAIN: 70,
-    si.ParagraphStyle.BULLET: 35,
-    si.ParagraphStyle.BULLET2: 35,
-    si.ParagraphStyle.BOLD: 70,
-    si.ParagraphStyle.HEADING: 150,
-    si.ParagraphStyle.CHECKBOX: 35,
-    si.ParagraphStyle.CHECKBOX_CHECKED: 35,
+    si.ParagraphStyle.PLAIN: base,
+    si.ParagraphStyle.BULLET: base/2,
+    si.ParagraphStyle.BULLET2: base/2,
+    si.ParagraphStyle.BOLD: base,
+    si.ParagraphStyle.HEADING: base*2,
+    si.ParagraphStyle.CHECKBOX: base/2,
+    si.ParagraphStyle.CHECKBOX_CHECKED: base/2,
+}
 
-    # There appears to be another format code (value 0) which is used when the
-    # text starts far down the page, which case it has a negative offset (line
-    # height) of about -20?
-    #
-    # Probably, actually, the line height should be added *after* the first
-    # line, but there is still something a bit odd going on here.
+# Extra space to add AFTER certain paragraph styles
+# This creates visual separation between headings and body text
+SPACE_AFTER = {
+    si.ParagraphStyle.HEADING: base * 0.5,  # Add extra space after headings
 }
 
 # Soft line heights for LINE_SEPARATOR (U+2028) breaks within paragraphs
@@ -74,6 +72,23 @@ SOFT_LINE_HEIGHTS = {
     si.ParagraphStyle.CHECKBOX: small_soft_base,
     si.ParagraphStyle.CHECKBOX_CHECKED: small_soft_base,
 }
+
+# Estimated character widths per style (fallback values)
+CHAR_WIDTHS = {
+    si.ParagraphStyle.PLAIN: 11,
+    si.ParagraphStyle.BULLET: 11,
+    si.ParagraphStyle.BULLET2: 11,
+    si.ParagraphStyle.BOLD: 12,
+    si.ParagraphStyle.HEADING: 22,
+    si.ParagraphStyle.CHECKBOX: 11,
+    si.ParagraphStyle.CHECKBOX_CHECKED: 11,
+}
+
+def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
+    """Get character width in screen units using estimated widths."""
+    if not char:
+        return 0.0
+    return CHAR_WIDTHS.get(style, 11)
 
 SVG_HEADER = string.Template("""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" height="$height" width="$width" viewBox="$viewbox">""")
@@ -94,25 +109,25 @@ def read_template_svg(template_path: Path) -> str:
 def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, float, float]:
     """
     Get the bounding box of the text content.
-    
+
     :return: x_min, x_max, y_min, y_max in screen units
     """
     LINE_SEPARATOR = '\u2028'
-    
+
     if text is None:
         return (0, 0, 0, 0)
-    
+
     doc = TextDocument.from_scene_item(text)
     if not doc.contents:
         return (0, 0, 0, 0)
-    
+
     # Calculate y positions the same way draw_text does
     y_offset = TEXT_TOP_Y
     y_positions = []
     for p in doc.contents:
         y_offset += LINE_HEIGHTS.get(p.style.value, 70)
         y_positions.append(text.pos_y + y_offset)
-        
+
         # Account for soft line breaks
         content = str(p)
         num_soft_breaks = content.count(LINE_SEPARATOR)
@@ -120,15 +135,20 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
             soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += num_soft_breaks * soft_line_height
             y_positions.append(text.pos_y + y_offset)
-    
+
+        # Account for space after
+        space_after = SPACE_AFTER.get(p.style.value, 0)
+        if space_after > 0:
+            y_offset += space_after
+
     # Text starts at pos_x and extends to pos_x + width
     x_min = text.pos_x
     x_max = text.pos_x + text.width
-    
+
     # Y range from first to last text line (with some padding for text height)
     y_min = y_positions[0] - 50  # approximate text ascent
     y_max = y_positions[-1] + 20  # approximate text descent
-    
+
     return (x_min, x_max, y_min, y_max)
 
 
@@ -137,13 +157,17 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
 
     # find the anchor pos for further use
     # newline_offsets contains the offset to subtract for strokes anchored to newlines
-    anchor_pos, newline_offsets = build_anchor_pos(tree.root_text)
+    # anchor_x_pos contains computed X positions for characters
+    anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset = build_anchor_pos(tree.root_text)
     _logger.debug("anchor_pos: %s", anchor_pos)
     _logger.debug("newline_offsets: %s", newline_offsets)
 
+    # Get text_pos_x for TEXT_CHAR anchor calculations
+    text_pos_x = tree.root_text.pos_x if tree.root_text is not None else None
+
     # find the extremum along x and y (for strokes)
-    x_min, x_max, y_min, y_max = get_bounding_box(tree.root, anchor_pos, newline_offsets)
-    
+    x_min, x_max, y_min, y_max = get_bounding_box(tree.root, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
+
     # Also include text bounds
     txt_x_min, txt_x_max, txt_y_min, txt_y_max = get_text_bounding_box(tree.root_text)
     if tree.root_text is not None:
@@ -151,7 +175,7 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
         x_max = max(x_max, txt_x_max)
         y_min = min(y_min, txt_y_min)
         y_max = max(y_max, txt_y_max)
-    
+
     width_pt = xx(x_max - x_min + 1)
     height_pt = yy(y_max - y_min + 1)
     _logger.debug("x_min, x_max, y_min, y_max: %.1f, %.1f, %.1f, %.1f ; scalded %.1f, %.1f, %.1f, %.1f",
@@ -172,7 +196,7 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     if tree.root_text is not None:
         draw_text(tree.root_text, output)
 
-    draw_group(tree.root, output, anchor_pos, newline_offsets)
+    draw_group(tree.root, output, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
 
     # Closing page group
     output.write('\t</g>\n')
@@ -180,118 +204,148 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     output.write('</svg>\n')
 
 
-def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int], tp.Dict[CrdtId, int]]:
+def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int], tp.Dict[CrdtId, int], tp.Dict[CrdtId, float], tp.Dict[CrdtId, float]]:
     """
     Find the anchor positions for every text node, including special top and
     bottom of text anchors.
 
     :param text: the root text of the remarkable file
-    :return: (anchor_pos, newline_offsets) where:
-        - anchor_pos maps CrdtId -> y position
+    :return: (anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset) where:
+        - anchor_pos maps CrdtId -> y position (includes soft line offset)
         - newline_offsets maps newline CrdtIds -> offset to subtract (one line height)
+        - anchor_x_pos maps CrdtId -> x position (for all characters)
+        - anchor_soft_offset maps CrdtId -> soft line offset applied to that character
     """
     LINE_SEPARATOR = '\u2028'
-    
+
     # Start with placeholder values for special anchors - will be updated below
     anchor_pos = {
         CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID): 100,
         CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID): 100,
     }
-    
+
     # Track newline anchors and their line height offset
-    # A paragraph's start_id is the newline that ENDS the previous paragraph.
-    # Strokes anchored to a newline should appear at the PREVIOUS line's position,
-    # so we need to subtract one line height when rendering.
     newline_offsets: tp.Dict[CrdtId, int] = {}
+
+    # Track X positions for each character
+    anchor_x_pos: tp.Dict[CrdtId, float] = {}
+
+    # Track soft line offset for each character
+    anchor_soft_offset: tp.Dict[CrdtId, float] = {}
 
     if text is not None:
         doc = TextDocument.from_scene_item(text)
         y_offset = TEXT_TOP_Y
-        last_content_y_offset = TEXT_TOP_Y  # Track last paragraph with actual content
-        
+        last_content_y_offset = TEXT_TOP_Y
+
         for i, p in enumerate(doc.contents):
-            # Add line height first (to match draw_text behavior)
             line_height = LINE_HEIGHTS.get(p.style.value, 70)
             soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += line_height
             ypos = text.pos_y + y_offset
-            
-            # Store position for this paragraph's start_id
+
             anchor_pos[p.start_id] = ypos
-            
-            # For paragraphs after the first, the start_id is a newline character
-            # that visually belongs to the PREVIOUS line. Record the offset needed.
+
             if i > 0:
                 newline_offsets[p.start_id] = line_height
-            
-            # Characters in this paragraph get positions, tracking soft line breaks
+
+            # Track character positions
             current_soft_offset = 0
+            cumulative_x = 0.0
+
             for subp in p.contents:
                 for j, k in enumerate(subp.i):
                     anchor_pos[k] = ypos + current_soft_offset
-                    
-                    # Check if this character is a LINE_SEPARATOR
+                    anchor_x_pos[k] = text.pos_x + cumulative_x
+                    anchor_soft_offset[k] = current_soft_offset
+
                     char = subp.s[j] if j < len(subp.s) else ''
                     if char == LINE_SEPARATOR:
                         current_soft_offset += soft_line_height
-            
-            # Account for soft line breaks in y_offset for next paragraph
+                        cumulative_x = 0.0  # Reset X for new line
+                    else:
+                        cumulative_x += get_char_width_screen(char, p.style.value)
+
             content = str(p)
             num_soft_breaks = content.count(LINE_SEPARATOR)
             if num_soft_breaks > 0:
                 y_offset += num_soft_breaks * soft_line_height
-            
-            # Track the y_offset after paragraphs with actual visible content
-            # (non-empty after stripping whitespace and LINE_SEPARATOR)
+
+            # Add extra space after certain paragraph styles (e.g., headings)
+            space_after = SPACE_AFTER.get(p.style.value, 0)
+            if space_after > 0:
+                y_offset += space_after
+
             visible_content = content.replace(LINE_SEPARATOR, '').strip()
             if visible_content:
                 last_content_y_offset = y_offset
- 
-        # Update special anchors to align with text positions:
-        # - TEXT_DOCUMENT_TOP_Y_CRDT_ID -> first text baseline
-        # - TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID -> last paragraph with visible content
+
         if doc.contents:
             first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
-            # Use last_content_y_offset instead of y_offset to ignore trailing empty paragraphs
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + last_content_y_offset
 
-    return anchor_pos, newline_offsets
+    return anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset
 
 
-def get_anchor(item: si.Group, anchor_pos, newline_offsets=None):
+def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
     """
     Get the anchor position for a group.
-    
+
     :param item: The group to get anchor for
     :param anchor_pos: Map of CrdtId -> y position
-    :param newline_offsets: Map of newline CrdtIds -> offset to subtract.
-        When a stroke is anchored to a newline character, it should be
-        positioned at the PREVIOUS line, so we subtract the line height.
+    :param newline_offsets: Map of newline CrdtIds -> offset to subtract
+    :param text_pos_x: X position of text block (fallback for TEXT_CHAR anchors)
+    :param anchor_x_pos: Map of CrdtId -> x position for characters
+    :param anchor_soft_offset: Map of CrdtId -> soft line offset for TEXT_CHAR adjustment
     """
     if newline_offsets is None:
         newline_offsets = {}
-        
+    if anchor_x_pos is None:
+        anchor_x_pos = {}
+    if anchor_soft_offset is None:
+        anchor_soft_offset = {}
+
     anchor_x = 0.0
     anchor_y = 0.0
     if item.anchor_id is not None:
         assert item.anchor_origin_x is not None
         anchor_x = item.anchor_origin_x.value
+
+        # For TEXT_CHAR anchors (anchor_type=1) with anchor_origin_x=0,
+        # use the computed character X position
+        if item.anchor_type is not None and item.anchor_type.value == 1 and anchor_x == 0:
+            if item.anchor_id.value in anchor_x_pos:
+                anchor_x = anchor_x_pos[item.anchor_id.value]
+                _logger.debug("TEXT_CHAR anchor: using char x=%.1f for %s",
+                              anchor_x, item.anchor_id.value)
+            elif text_pos_x is not None:
+                anchor_x = text_pos_x
+                _logger.debug("TEXT_CHAR anchor: fallback to text_pos_x=%.1f", text_pos_x)
+
         if item.anchor_id.value in anchor_pos:
             anchor_y = anchor_pos[item.anchor_id.value]
-            
-            # If this anchor is a newline, adjust y to previous line's position
+
+            # For TEXT_CHAR anchors, subtract excess soft offset beyond first line
+            # This is because stroke coordinates are relative to the first content line,
+            # not the specific soft line the anchor character is on
+            if item.anchor_type is not None and item.anchor_type.value == 1:
+                soft_off = anchor_soft_offset.get(item.anchor_id.value, 0)
+                # Only subtract offset beyond first line (assume first line is at soft_off = 60)
+                # This brings anchors from line 2+ back to line 1
+                first_line_offset = 60  # SOFT_LINE_HEIGHTS default for first content line
+                if soft_off > first_line_offset:
+                    excess = soft_off - first_line_offset
+                    anchor_y -= excess
+                    _logger.debug("TEXT_CHAR anchor: subtracting excess soft_offset=%.1f for %s",
+                                  excess, item.anchor_id.value)
+
             if item.anchor_id.value in newline_offsets:
                 anchor_y -= newline_offsets[item.anchor_id.value]
                 _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %d)",
-                              item.anchor_id.value,
-                              anchor_y,
-                              newline_offsets[item.anchor_id.value])
+                              item.anchor_id.value, anchor_y, newline_offsets[item.anchor_id.value])
             else:
-                _logger.debug("Group anchor: %s -> y=%.1f (scalded y=%.1f)",
-                              item.anchor_id.value,
-                              anchor_y,
-                              yy(anchor_y))
+                _logger.debug("Group anchor: %s -> y=%.1f", item.anchor_id.value, anchor_y)
         else:
             _logger.warning("Group anchor: %s is unknown!", item.anchor_id.value)
 
@@ -301,24 +355,26 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None):
 def get_bounding_box(item: si.Group,
                      anchor_pos: tp.Dict[CrdtId, int],
                      newline_offsets: tp.Dict[CrdtId, int] = None,
+                     text_pos_x: float = None,
+                     anchor_x_pos: tp.Dict[CrdtId, float] = None,
+                     anchor_soft_offset: tp.Dict[CrdtId, float] = None,
                      default: tp.Tuple[int, int, int, int] = (- SCREEN_WIDTH // 2, SCREEN_WIDTH // 2, 0, SCREEN_HEIGHT)) \
         -> tp.Tuple[int, int, int, int]:
-    """
-    Get the bounding box of the given item.
-    The minimum size is the default size of the screen.
-
-    :return: x_min, x_max, y_min, y_max: the bounding box in screen units (need to be scalded using xx and yy functions)
-    """
+    """Get the bounding box of the given item."""
     if newline_offsets is None:
         newline_offsets = {}
-        
+    if anchor_x_pos is None:
+        anchor_x_pos = {}
+    if anchor_soft_offset is None:
+        anchor_soft_offset = {}
+
     x_min, x_max, y_min, y_max = default
 
     for child_id in item.children:
         child = item.children[child_id]
         if isinstance(child, si.Group):
-            anchor_x, anchor_y = get_anchor(child, anchor_pos, newline_offsets)
-            x_min_t, x_max_t, y_min_t, y_max_t = get_bounding_box(child, anchor_pos, newline_offsets, (0, 0, 0, 0))
+            anchor_x, anchor_y = get_anchor(child, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
+            x_min_t, x_max_t, y_min_t, y_max_t = get_bounding_box(child, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset, (0, 0, 0, 0))
             x_min = min(x_min, x_min_t + anchor_x)
             x_max = max(x_max, x_max_t + anchor_x)
             y_min = min(y_min, y_min_t + anchor_y)
@@ -332,10 +388,14 @@ def get_bounding_box(item: si.Group,
     return x_min, x_max, y_min, y_max
 
 
-def draw_group(item: si.Group, output, anchor_pos, newline_offsets=None):
+def draw_group(item: si.Group, output, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
     if newline_offsets is None:
         newline_offsets = {}
-    anchor_x, anchor_y = get_anchor(item, anchor_pos, newline_offsets)
+    if anchor_x_pos is None:
+        anchor_x_pos = {}
+    if anchor_soft_offset is None:
+        anchor_soft_offset = {}
+    anchor_x, anchor_y = get_anchor(item, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
     output.write(f'\t\t<g id="{item.node_id}" transform="translate({xx(anchor_x)}, {yy(anchor_y)})">\n')
     for child_id in item.children:
         child = item.children[child_id]
@@ -343,32 +403,27 @@ def draw_group(item: si.Group, output, anchor_pos, newline_offsets=None):
         if _logger.root.level == logging.DEBUG:
             output.write(f'\t\t<!-- child {child_id} {type(child)} -->\n')
         if isinstance(child, si.Group):
-            draw_group(child, output, anchor_pos, newline_offsets)
+            draw_group(child, output, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
         elif isinstance(child, si.Line):
             draw_stroke(child, output)
     output.write(f'\t\t</g>\n')
 
 
 def draw_stroke(item: si.Line, output):
-    # print debug infos
     if _logger.root.level == logging.DEBUG:
         _logger.debug("Writing line: %s", item)
         output.write(f'\t\t\t<!-- Stroke tool: {item.tool.name} '
                      f'color: {item.color.name} thickness_scale: {item.thickness_scale} -->\n')
 
-    # initiate the pen
     pen = Pen.create(item.tool.value, item.color.value, item.thickness_scale)
 
     last_xpos = -1.
     last_ypos = -1.
     last_segment_width = segment_width = 0
-    # Iterate through the point to form a polyline
     for point_idx, point in enumerate(item.points):
-        # align the original position
         xpos = point.x
         ypos = point.y
         if point_idx % pen.segment_length == 0:
-            # if there was a previous segment, end it
             if point_idx > 0:
                 output.write('"/>\n')
 
@@ -378,24 +433,18 @@ def draw_stroke(item: si.Line, output):
                                                   last_segment_width)
             segment_opacity = pen.get_segment_opacity(point.speed, point.direction, point.width, point.pressure,
                                                       last_segment_width)
-            # create the next segment of the stroke
             output.write('\t\t\t<polyline ')
             output.write(f'style="fill:none; stroke:{segment_color}; '
                          f'stroke-width:{scale(segment_width):.3f}; opacity:{segment_opacity}" ')
             output.write(f'stroke-linecap="{pen.stroke_linecap}" ')
             output.write('points="')
             if point_idx > 0:
-                # Join to previous segment
                 output.write(f'{xx(last_xpos):.3f},{yy(last_ypos):.3f} ')
-        # store the last position
         last_xpos = xpos
         last_ypos = ypos
         last_segment_width = segment_width
-
-        # add current point
         output.write(f'{xx(xpos):.3f},{yy(ypos):.3f} ')
 
-    # end stroke
     output.write('" />\n')
 
 
@@ -417,9 +466,7 @@ def draw_text(text: si.Text, output):
             </style>
 ''')
 
-    # LINE SEPARATOR character used by reMarkable for soft line breaks within paragraphs
     LINE_SEPARATOR = '\u2028'
-
     y_offset = TEXT_TOP_Y
 
     doc = TextDocument.from_scene_item(text)
@@ -432,24 +479,24 @@ def draw_text(text: si.Text, output):
         ypos = text.pos_y + y_offset
         cls = p.style.value.name.lower()
         content = str(p)
-        
-        # Split content by LINE SEPARATOR and render each part on its own line
-        # Track the line offset based on LINE_SEP count, not split index
+
         lines = content.split(LINE_SEPARATOR)
-        line_offset = 0  # How many soft line heights to add
+        line_offset = 0
         for line_content in lines:
             if line_content.strip():
-                # TODO: this doesn't take into account the CrdtStr.properties (font-weight/font-style)
                 if _logger.root.level == logging.DEBUG:
                     output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} offset {line_offset} -->\n')
                 line_ypos = ypos + (line_offset * soft_line_height)
                 output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(line_ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(line_content)}</text>\n')
-            # Every LINE_SEPARATOR adds a line offset (whether or not there's content)
             line_offset += 1
-        
-        # Account for extra lines from LINE_SEPARATOR in the y_offset for subsequent paragraphs
-        extra_lines = len(lines) - 1  # Number of LINE_SEPARATORs
+
+        extra_lines = len(lines) - 1
         if extra_lines > 0:
             y_offset += extra_lines * soft_line_height
-    
+
+        # Add extra space after certain paragraph styles (e.g., headings)
+        space_after = SPACE_AFTER.get(p.style.value, 0)
+        if space_after > 0:
+            y_offset += space_after
+
     output.write('\t\t</g>\n')
