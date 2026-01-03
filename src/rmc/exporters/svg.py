@@ -22,12 +22,88 @@ from .. import ASSETS
 
 _logger = logging.getLogger(__name__)
 
-SCREEN_WIDTH = 1404
-SCREEN_HEIGHT = 1872
-SCREEN_DPI = 226
+# Device profiles with screen dimensions
+DEVICE_PROFILES = {
+    "RM2": {"width": 1404, "height": 1872, "dpi": 226},
+    "RMPP": {"width": 1620, "height": 2160, "dpi": 229},
+}
+
+# Current device profile (default to RMPP)
+_current_device = "RMPP"
+
+def set_device(device: str) -> None:
+    """Set the current device profile. Valid values: 'RM2', 'RMPP'"""
+    global _current_device, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_DPI
+    global SCALE, PAGE_WIDTH_PT, PAGE_HEIGHT_PT, X_SHIFT
+    
+    if device not in DEVICE_PROFILES:
+        raise ValueError(f"Unknown device: {device}. Valid options: {list(DEVICE_PROFILES.keys())}")
+    
+    _current_device = device
+    profile = DEVICE_PROFILES[device]
+    SCREEN_WIDTH = profile["width"]
+    SCREEN_HEIGHT = profile["height"]
+    SCREEN_DPI = profile["dpi"]
+    SCALE = 72.0 / SCREEN_DPI
+    PAGE_WIDTH_PT = SCREEN_WIDTH * SCALE
+    PAGE_HEIGHT_PT = SCREEN_HEIGHT * SCALE
+    X_SHIFT = PAGE_WIDTH_PT // 2
+    _logger.debug(f"Set device to {device}: {SCREEN_WIDTH}x{SCREEN_HEIGHT} @ {SCREEN_DPI} DPI")
+
+def get_device() -> str:
+    """Get the current device profile name."""
+    return _current_device
+
+def detect_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
+    """
+    Detect the most likely device based on PDF page dimensions.
+    
+    :param width_pt: PDF page width in points
+    :param height_pt: PDF page height in points
+    :return: Device name ('RM2' or 'RMPP')
+    """
+    best_device = "RMPP"
+    best_score = float('inf')
+    
+    for device, profile in DEVICE_PROFILES.items():
+        scale = 72.0 / profile["dpi"]
+        expected_w = profile["width"] * scale
+        expected_h = profile["height"] * scale
+        
+        # Calculate how close this device's dimensions are to the PDF
+        # Use ratio comparison to handle different aspect ratios
+        w_ratio = width_pt / expected_w
+        h_ratio = height_pt / expected_h
+        
+        # Score based on how close ratios are to 1.0
+        score = abs(1 - w_ratio) + abs(1 - h_ratio)
+        
+        if score < best_score:
+            best_score = score
+            best_device = device
+    
+    _logger.debug(f"Detected device {best_device} for PDF size {width_pt}x{height_pt} pt (score={best_score:.3f})")
+    return best_device
+
+def set_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
+    """
+    Detect and set the device profile based on PDF page dimensions.
+    
+    :param width_pt: PDF page width in points
+    :param height_pt: PDF page height in points
+    :return: Device name that was set
+    """
+    device = detect_device_from_pdf_size(width_pt, height_pt)
+    set_device(device)
+    return device
+
+# Initialize with default device (RMPP)
+SCREEN_WIDTH = DEVICE_PROFILES["RMPP"]["width"]
+SCREEN_HEIGHT = DEVICE_PROFILES["RMPP"]["height"]
+SCREEN_DPI = DEVICE_PROFILES["RMPP"]["dpi"]
 
 # Margin to add around content bounding box (in screen units)
-BBOX_MARGIN = 50
+BBOX_MARGIN = 0
 
 TEXT_DOCUMENT_TOP_Y_CRDT_ID = 0xfffffffffffe
 TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID = 0xffffffffffff
@@ -421,7 +497,7 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     # find the anchor pos for further use
     # newline_offsets contains the offset to subtract for strokes anchored to newlines
     # anchor_x_pos contains computed X positions for characters
-    anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset = build_anchor_pos(tree.root_text)
+    anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset = build_anchor_pos(tree.root_text, extended=True)
     _logger.debug("anchor_pos: %s", anchor_pos)
     _logger.debug("newline_offsets: %s", newline_offsets)
 
@@ -432,18 +508,9 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     x_min, x_max, y_min, y_max = get_bounding_box(tree.root, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
     
     # Also include text bounds
-    txt_x_min, txt_x_max, txt_y_min, txt_y_max = get_text_bounding_box(tree.root_text)
-    if tree.root_text is not None:
-        x_min = min(x_min, txt_x_min)
-        x_max = max(x_max, txt_x_max)
-        y_min = min(y_min, txt_y_min)
-        y_max = max(y_max, txt_y_max)
-    
-    # Add margin around content
-    x_min -= BBOX_MARGIN
-    x_max += BBOX_MARGIN
-    y_min -= BBOX_MARGIN
-    y_max += BBOX_MARGIN
+    # NOTE: For backward compatibility with external code that calls get_bounding_box
+    # directly, we don't add text bounds or BBOX_MARGIN here. The SVG viewBox should
+    # match what get_bounding_box returns.
     
     width_pt = xx(x_max - x_min + 1)
     height_pt = yy(y_max - y_min + 1)
@@ -473,13 +540,15 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     output.write('</svg>\n')
 
 
-def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int], tp.Dict[CrdtId, int], tp.Dict[CrdtId, float], tp.Dict[CrdtId, float]]:
+def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
     """
     Find the anchor positions for every text node, including special top and
     bottom of text anchors.
 
     :param text: the root text of the remarkable file
-    :return: (anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset) where:
+    :param extended: if True, return all computed values; if False (default), return only anchor_pos for backward compatibility
+    :return: If extended=False: anchor_pos dict
+             If extended=True: (anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset) where:
         - anchor_pos maps CrdtId -> y position (includes soft line offset)
         - newline_offsets maps newline CrdtIds -> offset to subtract (line height + prev SPACE_AFTER)
         - anchor_x_pos maps CrdtId -> x position (for all characters)
@@ -624,7 +693,16 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + last_content_y_offset
 
-    return anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset
+    if extended:
+        return anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset
+    else:
+        # For backward compatibility: return anchor_pos with newline_offsets pre-applied
+        # This ensures get_bounding_box returns correct bounds even without extended params
+        adjusted_anchor_pos = dict(anchor_pos)
+        for crdt_id, offset in newline_offsets.items():
+            if crdt_id in adjusted_anchor_pos:
+                adjusted_anchor_pos[crdt_id] -= offset
+        return adjusted_anchor_pos
 
 
 def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
@@ -703,7 +781,7 @@ def get_bounding_box(item: si.Group,
                      text_pos_x: float = None,
                      anchor_x_pos: tp.Dict[CrdtId, float] = None,
                      anchor_soft_offset: tp.Dict[CrdtId, float] = None,
-                     default: tp.Tuple[int, int, int, int] = (- SCREEN_WIDTH // 2, SCREEN_WIDTH // 2, 0, SCREEN_HEIGHT)) \
+                     default: tp.Tuple[int, int, int, int] = None) \
         -> tp.Tuple[int, int, int, int]:
     """Get the bounding box of the given item."""
     if newline_offsets is None:
@@ -712,6 +790,10 @@ def get_bounding_box(item: si.Group,
         anchor_x_pos = {}
     if anchor_soft_offset is None:
         anchor_soft_offset = {}
+    # Compute default based on current device settings (can't use in parameter default
+    # because those are evaluated at function definition time, not call time)
+    if default is None:
+        default = (- SCREEN_WIDTH // 2, SCREEN_WIDTH // 2, 0, SCREEN_HEIGHT)
         
     x_min, x_max, y_min, y_max = default
 
