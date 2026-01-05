@@ -115,6 +115,230 @@ PAGE_HEIGHT_PT = SCREEN_HEIGHT * SCALE
 X_SHIFT = PAGE_WIDTH_PT // 2
 
 
+# =============================================================================
+# FONT CONFIGURATION
+# =============================================================================
+# All font files, sizes (in points), and weights are defined here.
+# Change these values to adjust text rendering throughout the document.
+#
+# To add a new font:
+# 1. Add the .woff2 file to rmc/assets/fonts/
+# 2. Add an entry to FONTS below with a unique key
+# 3. Reference it in FONT_CONFIG or CSS generation as needed
+
+# Font directory within assets
+FONTS_DIR = ASSETS / "fonts"
+
+# Font definitions - maps font keys to their configuration
+# Each entry specifies:
+#   - file: filename in the fonts directory
+#   - family: CSS font-family name
+#   - style: CSS font-style (normal, italic)
+#   - weight_range: CSS font-weight range for variable fonts
+#   - format: font format for CSS (woff2, truetype)
+#   - fallback: optional fallback font config if primary doesn't exist
+FONTS = {
+    "sans": {
+        "file": "reMarkableSans.woff2",
+        "family": "reMarkable Sans VF",
+        "style": "normal",
+        "weight_range": "300 700",
+        "format": "woff2",
+        "fallback": {
+            "file": "NotoSans-VariableFont_wdth,wght.ttf",
+            "family": "Noto Sans",
+            "format": "truetype",
+            "weight_range": "100 900",
+        },
+    },
+    "sans_italic": {
+        "file": "reMarkableSansItalic.woff2",  # doesn't exist, will trigger fallback
+        "family": "reMarkable Sans VF",
+        "style": "italic",
+        "weight_range": "300 700",
+        "format": "woff2",
+        "fallback": {
+            "file": "NotoSans-Italic-VariableFont_wdth,wght.ttf",
+            "family": "Noto Sans",
+            "format": "truetype",
+            "weight_range": "100 900",
+        },
+    },
+    "serif": {
+        "file": "reMarkableSerif.woff2",
+        "family": "reMarkable Serif VF",
+        "style": "normal",
+        "weight_range": "300 800",
+        "format": "woff2",
+        "fallback": {
+            "file": "EBGaramond-VariableFont_wght.ttf",
+            "family": "EB Garamond",
+            "format": "truetype",
+            "weight_range": "400 800",
+        },
+    },
+    "serif_italic": {
+        "file": "reMarkableSerifItalic.woff2",
+        "family": "reMarkable Serif VF",
+        "style": "italic",
+        "weight_range": "300 800",
+        "format": "woff2",
+        "fallback": {
+            "file": "EBGaramond-Italic-VariableFont_wght.ttf",
+            "family": "EB Garamond",
+            "format": "truetype",
+            "weight_range": "400 800",
+        },
+    },
+}
+
+
+def _resolve_font_config(font_key: str) -> tp.Optional[dict]:
+    """Resolve font config, falling back if primary font file doesn't exist."""
+    font_config = FONTS.get(font_key)
+    if font_config is None:
+        return None
+
+    primary_path = FONTS_DIR / font_config["file"]
+    if primary_path.exists():
+        return {
+            "file": font_config["file"],
+            "family": font_config["family"],
+            "style": font_config["style"],
+            "weight_range": font_config["weight_range"],
+            "format": font_config.get("format", "woff2"),
+        }
+
+    # Try fallback
+    fallback = font_config.get("fallback")
+    if fallback:
+        fallback_path = FONTS_DIR / fallback["file"]
+        if fallback_path.exists():
+            return {
+                "file": fallback["file"],
+                "family": fallback["family"],
+                "style": font_config["style"],  # inherit style from primary
+                "weight_range": fallback["weight_range"],
+                "format": fallback["format"],
+            }
+
+    return None
+
+
+def _get_resolved_font_family(font_key: str) -> str:
+    """Get the resolved font family name for a font key."""
+    resolved = _resolve_font_config(font_key)
+    if resolved:
+        return resolved["family"]
+    # Fallback to original config family
+    return FONTS[font_key]["family"] if FONTS.get(font_key) else "sans-serif"
+
+
+# Convenience aliases for font families (resolved dynamically)
+# These are initialized lazily to allow fallback resolution
+_font_family_serif: tp.Optional[str] = None
+_font_family_sans: tp.Optional[str] = None
+
+
+def _ensure_font_families():
+    """Ensure font family globals are initialized."""
+    global _font_family_serif, _font_family_sans
+    if _font_family_serif is None:
+        _font_family_serif = _get_resolved_font_family("serif")
+    if _font_family_sans is None:
+        _font_family_sans = _get_resolved_font_family("sans")
+
+
+def get_font_family_serif() -> str:
+    """Get the resolved serif font family name."""
+    _ensure_font_families()
+    return _font_family_serif
+
+
+def get_font_family_sans() -> str:
+    """Get the resolved sans font family name."""
+    _ensure_font_families()
+    return _font_family_sans
+
+
+# Keep these for backwards compatibility but they may not reflect fallback fonts
+# Use get_font_family_serif() and get_font_family_sans() for resolved names
+FONT_FAMILY_SERIF = FONTS["serif"]["family"]
+FONT_FAMILY_SANS = FONTS["sans"]["family"]
+
+# Font weight ranges (derived from FONTS config)
+FONT_WEIGHT_RANGE_SERIF = FONTS["serif"]["weight_range"]
+FONT_WEIGHT_RANGE_SANS = FONTS["sans"]["weight_range"]
+
+# Font configuration per paragraph style
+# Each entry contains: family ('serif' or 'sans'), size (in points), weight
+FONT_CONFIG = {
+    "heading": {
+        "family": "serif",
+        "size": 15,
+        "weight": 450,
+    },
+    "bold": {
+        "family": "sans",
+        "size": 8.3,
+        "weight": 500,
+    },
+    "plain": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    # These styles inherit from plain
+    "bullet": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "bullet2": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "checkbox": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "checkbox_checked": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "checkbox2": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "checkbox2_checked": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "numbered": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+    "numbered2": {
+        "family": "sans",
+        "size": 7.7,
+        "weight": 400,
+    },
+}
+
+# Inline formatting weights
+FONT_WEIGHT_INLINE_BOLD = 700
+
+
+# =============================================================================
+# LAYOUT CONFIGURATION
+# =============================================================================
+
 # Checkbox positioning constants (used in both build_anchor_pos and draw_text)
 CHECKBOX_SIZE = 12  # Size in points
 CHECKBOX_TEXT_GAP = 4  # Gap between checkbox and text in points
@@ -166,7 +390,7 @@ LINE_HEIGHTS = {
 # Extra space to add AFTER certain paragraph styles
 # This creates visual separation between headings and body text
 SPACE_AFTER = {
-    si.ParagraphStyle.HEADING: base * 0.5,  # Add extra space after headings
+    si.ParagraphStyle.HEADING: base * 0.3,  # Add extra space after headings
 }
 
 # Soft line heights for LINE_SEPARATOR (U+2028) breaks within paragraphs
@@ -187,68 +411,57 @@ SOFT_LINE_HEIGHTS = {
     si.ParagraphStyle.NUMBERED2: small_soft_base,
 }
 
-# Font sizes in points (from CSS styles)
-FONT_SIZES_PT = {
-    si.ParagraphStyle.PLAIN: 7.7,
-    si.ParagraphStyle.BULLET: 7.7,
-    si.ParagraphStyle.BULLET2: 7.7,
-    si.ParagraphStyle.BOLD: 8.3,
-    si.ParagraphStyle.HEADING: 15,
-    si.ParagraphStyle.CHECKBOX: 7.7,
-    si.ParagraphStyle.CHECKBOX_CHECKED: 7.7,
-    si.ParagraphStyle.CHECKBOX2: 7.7,
-    si.ParagraphStyle.CHECKBOX2_CHECKED: 7.7,
-    si.ParagraphStyle.NUMBERED: 7.7,
-    si.ParagraphStyle.NUMBERED2: 7.7,
-}
+
+def _get_font_size_pt(style: si.ParagraphStyle) -> float:
+    """Get font size in points for a paragraph style."""
+    style_name = style.name.lower()
+    config = FONT_CONFIG.get(style_name, FONT_CONFIG["plain"])
+    return config["size"]
+
+
+def _get_font_family(style: si.ParagraphStyle) -> str:
+    """Get font family key ('serif' or 'sans') for a paragraph style."""
+    style_name = style.name.lower()
+    config = FONT_CONFIG.get(style_name, FONT_CONFIG["plain"])
+    return config["family"]
+
 
 # Font metrics - loaded lazily
 _font_metrics: tp.Optional[dict] = None
 
 def _load_font_metrics():
-    """Load font metrics from woff2 files using fonttools."""
+    """Load font metrics from font files using fonttools.
+
+    Loads all fonts defined in FONTS configuration, using fallbacks as needed.
+    """
     global _font_metrics
     if _font_metrics is not None:
         return _font_metrics
-    
+
     try:
         from fontTools.ttLib import TTFont
     except ImportError:
         _logger.warning("fonttools not available, using estimated character widths")
         _font_metrics = {}
         return _font_metrics
-    
-    current_dir = Path(__file__).parent.parent
-    assets = current_dir / "assets"
-    
+
     _font_metrics = {}
-    
-    # Load sans font (used for most text)
-    sans_path = assets / "reMarkableSans.woff2"
-    if sans_path.exists():
+
+    for font_key in FONTS.keys():
+        resolved = _resolve_font_config(font_key)
+        if resolved is None:
+            continue
+        font_path = FONTS_DIR / resolved["file"]
         try:
-            sans_font = TTFont(sans_path)
-            _font_metrics['sans'] = {
-                'cmap': sans_font.getBestCmap(),
-                'hmtx': sans_font['hmtx'],
-                'upem': sans_font['head'].unitsPerEm,
+            font = TTFont(font_path)
+            _font_metrics[font_key] = {
+                'cmap': font.getBestCmap(),
+                'hmtx': font['hmtx'],
+                'upem': font['head'].unitsPerEm,
             }
         except Exception as e:
-            _logger.warning(f"Failed to load sans font: {e}")
-    
-    # Load serif font (used for headings)
-    serif_path = assets / "reMarkableSerif.woff2"
-    if serif_path.exists():
-        try:
-            serif_font = TTFont(serif_path)
-            _font_metrics['serif'] = {
-                'cmap': serif_font.getBestCmap(),
-                'hmtx': serif_font['hmtx'],
-                'upem': serif_font['head'].unitsPerEm,
-            }
-        except Exception as e:
-            _logger.warning(f"Failed to load serif font: {e}")
-    
+            _logger.warning(f"Failed to load {font_key} font from {resolved['file']}: {e}")
+
     return _font_metrics
 
 def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
@@ -258,25 +471,13 @@ def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
     
     metrics = _load_font_metrics()
     
-    is_heading = style == si.ParagraphStyle.HEADING
-    font_key = 'serif' if is_heading else 'sans'
+    font_key = _get_font_family(style)
     
     if font_key not in metrics:
-        # Fallback to estimated widths
-        fallback_widths = {
-            si.ParagraphStyle.PLAIN: 11,
-            si.ParagraphStyle.BULLET: 11,
-            si.ParagraphStyle.BULLET2: 11,
-            si.ParagraphStyle.BOLD: 12,
-            si.ParagraphStyle.HEADING: 22,
-            si.ParagraphStyle.CHECKBOX: 11,
-            si.ParagraphStyle.CHECKBOX_CHECKED: 11,
-            si.ParagraphStyle.CHECKBOX2: 11,
-            si.ParagraphStyle.CHECKBOX2_CHECKED: 11,
-            si.ParagraphStyle.NUMBERED: 11,
-            si.ParagraphStyle.NUMBERED2: 11,
-        }
-        return fallback_widths.get(style, 11)
+        # Fallback to estimated widths based on font size
+        font_size = _get_font_size_pt(style)
+        # Approximate: average char width is ~0.5 * font size, scaled to screen units
+        return font_size * 0.5 * SCREEN_DPI / 72
     
     font = metrics[font_key]
     cmap = font['cmap']
@@ -291,7 +492,7 @@ def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
         width_fu = 500  # fallback
     
     # Convert to screen units: font_units * (font_size_screen / upem)
-    font_size_pt = FONT_SIZES_PT.get(style, 7.7)
+    font_size_pt = _get_font_size_pt(style)
     font_size_screen = font_size_pt * SCREEN_DPI / 72
     
     return width_fu * font_size_screen / upem
@@ -370,7 +571,11 @@ SVG_HEADER = string.Template("""<?xml version="1.0" encoding="UTF-8"?>
 
 
 def rm_to_svg(rm_path, svg_path):
-    """Convert `rm_path` to SVG at `svg_path`."""
+    """Convert `rm_path` to SVG at `svg_path`.
+
+    :param rm_path: Path to .rm file
+    :param svg_path: Path to output SVG file
+    """
     with open(rm_path, "rb") as infile, open(svg_path, "wt") as outfile:
         tree = read_tree(infile)
         tree_to_svg(tree, outfile)
@@ -492,7 +697,12 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
 
 
 def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
-    """Convert Blocks to SVG."""
+    """Convert Blocks to SVG.
+
+    :param tree: The scene tree to convert
+    :param output: Output file object to write SVG to
+    :param include_template: Optional template SVG to include as background
+    """
 
     # find the anchor pos for further use
     # newline_offsets contains the offset to subtract for strokes anchored to newlines
@@ -505,16 +715,14 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     text_pos_x = tree.root_text.pos_x if tree.root_text is not None else None
 
     # find the extremum along x and y (for strokes)
-    x_min, x_max, y_min, y_max = get_bounding_box(tree.root, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
-    
-    # Also include text bounds
-    # NOTE: For backward compatibility with external code that calls get_bounding_box
-    # directly, we don't add text bounds or BBOX_MARGIN here. The SVG viewBox should
-    # match what get_bounding_box returns.
+    # get_bounding_box defaults to device dimensions, expanding if content extends beyond
+    x_min, x_max, y_min, y_max = get_bounding_box(
+        tree.root, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset
+    )
     
     width_pt = xx(x_max - x_min + 1)
     height_pt = yy(y_max - y_min + 1)
-    _logger.debug("x_min, x_max, y_min, y_max: %.1f, %.1f, %.1f, %.1f ; scalded %.1f, %.1f, %.1f, %.1f",
+    _logger.debug("x_min, x_max, y_min, y_max: %.1f, %.1f, %.1f, %.1f ; scaled %.1f, %.1f, %.1f, %.1f",
                   x_min, x_max, y_min, y_max, xx(x_min), xx(x_max), yy(y_min), yy(y_max))
 
     # add svg header
@@ -783,7 +991,10 @@ def get_bounding_box(item: si.Group,
                      anchor_soft_offset: tp.Dict[CrdtId, float] = None,
                      default: tp.Tuple[int, int, int, int] = None) \
         -> tp.Tuple[int, int, int, int]:
-    """Get the bounding box of the given item."""
+    """Get the bounding box of the given item.
+
+    Default bounds are device dimensions, expanding to include any content beyond.
+    """
     if newline_offsets is None:
         newline_offsets = {}
     if anchor_x_pos is None:
@@ -875,68 +1086,105 @@ def draw_stroke(item: si.Line, output):
     output.write('" />\n')
 
 
+# Cache for base64-encoded fonts (loaded once per session)
+# Maps font_key -> {"data": base64_string, "config": resolved_config}
+_font_data_cache: tp.Optional[tp.Dict[str, tp.Dict[str, tp.Any]]] = None
+
+
+def _load_font_data() -> tp.Dict[str, tp.Dict[str, tp.Any]]:
+    """Load and base64-encode all fonts defined in FONTS configuration.
+
+    Returns a dict mapping font keys to their base64-encoded data and resolved config.
+    Uses fallback fonts if primary fonts are not available.
+    """
+    global _font_data_cache
+    if _font_data_cache is not None:
+        return _font_data_cache
+
+    _font_data_cache = {}
+    for font_key in FONTS.keys():
+        resolved = _resolve_font_config(font_key)
+        if resolved is None:
+            continue
+        font_path = FONTS_DIR / resolved["file"]
+        try:
+            font_data = font_path.read_bytes()
+            _font_data_cache[font_key] = {
+                "data": base64.b64encode(font_data).decode("ascii"),
+                "config": resolved,
+            }
+        except Exception as e:
+            _logger.warning(f"Failed to load font data for {font_key}: {e}")
+
+    return _font_data_cache
+
+
+def _generate_font_face_css() -> str:
+    """Generate @font-face CSS declarations for all fonts in FONTS configuration.
+
+    Uses resolved font configs (including fallbacks) and appropriate MIME types.
+    """
+    font_data = _load_font_data()
+    css_rules = []
+
+    for font_key, entry in font_data.items():
+        config = entry["config"]
+        data = entry["data"]
+
+        # Determine MIME type based on format
+        mime_type = "font/woff2" if config["format"] == "woff2" else "font/ttf"
+
+        css_rules.append(f'''@font-face {{
+                  font-family: "{config["family"]}";
+                  src: url("data:{mime_type};base64,{data}") format("{config["format"]}");
+                  font-style: {config["style"]};
+                  font-weight: {config["weight_range"]};
+                }}''')
+
+    return "\n                ".join(css_rules)
+
+
+def _generate_font_css() -> str:
+    """Generate CSS for all font styles from FONT_CONFIG."""
+    css_rules = []
+
+    # Use resolved font families (which account for fallbacks)
+    serif_family = get_font_family_serif()
+    sans_family = get_font_family_sans()
+
+    for style_name, config in FONT_CONFIG.items():
+        family = serif_family if config["family"] == "serif" else sans_family
+        fallback = "serif" if config["family"] == "serif" else "sans-serif"
+
+        css_rules.append(f'''text.{style_name} {{
+                    font-family: "{family}", {fallback};
+                    font-size: {config["size"]}pt;
+                    font-weight: {config["weight"]};
+                }}''')
+
+    return "\n                ".join(css_rules)
+
+
 def draw_text(text: si.Text, output):
     output.write('\t\t<g class="root-text" style="display:inline">')
 
-    remarkable_serif_woff2 = ASSETS / 'reMarkableSerif.woff2'
-    remarkable_serif = "reMarkable Serif VF"
-    remarkable_serif_data = remarkable_serif_woff2.read_bytes()
-    remarkable_serif_b64 = base64.b64encode(remarkable_serif_data).decode("ascii")
-
-    remarkable_sans_woff2 = ASSETS / 'reMarkableSans.woff2'
-    remarkable_sans = "reMarkable Sans VF"
-    remarkable_sans_data = remarkable_sans_woff2.read_bytes()
-    remarkable_sans_b64 = base64.b64encode(remarkable_sans_data).decode("ascii")
+    # Get config values for default text style
+    plain_config = FONT_CONFIG["plain"]
 
     output.write(f'''
             <style><![CDATA[
-                @font-face {{
-                  font-family: "{remarkable_serif}";
-                  src: url("data:font/woff2;base64,{remarkable_serif_b64}") format("woff2");
-                  font-style: normal;
-                  font-weight: 300 800;
+                {_generate_font_face_css()}
+                text {{
+                    font-family: "{FONT_FAMILY_SANS}", sans-serif;
+                    font-size: {plain_config["size"]}pt;
+                    font-weight: {plain_config["weight"]};
                 }}
-                @font-face {{
-                  font-family: "{remarkable_sans}";
-                  src: url("data:font/woff2;base64,{remarkable_sans_b64}") format("woff2");
-                  font-style: normal;
-                  font-weight: 300 700;
-                }}
-                text.heading {{
-                    font-family: "{remarkable_serif}", serif;
-                    font-size: 15pt;
-                    font-weight: 400; 
-                }}
-                text.bold {{
-                    font-family: "{remarkable_sans}", sans-serif;
-                    font-size: 8.3pt;
-                    font-weight: 500; 
-                }}
-                text, text.plain, text.basic {{
-                    font-family: "{remarkable_sans}", sans-serif;
-                    font-size: 7.7pt;
-                    font-weight: 400;
-                }}
-                text.bullet, text.bullet2 {{
-                    font-family: "{remarkable_sans}", sans-serif;
-                    font-size: 7.7pt;
-                    font-weight: 400;
-                }}
-                text.checkbox, text.checkbox_checked, text.checkbox2, text.checkbox2_checked {{
-                    font-family: "{remarkable_sans}", sans-serif;
-                    font-size: 7.7pt;
-                    font-weight: 400;
-                }}
+                {_generate_font_css()}
                 text.checkbox_checked, text.checkbox2_checked {{
                     text-decoration: line-through;
                 }}
-                text.numbered, text.numbered2 {{
-                    font-family: "{remarkable_sans}", sans-serif;
-                    font-size: 7.7pt;
-                    font-weight: 400;
-                }}
                 tspan.inline-bold {{
-                    font-weight: 700;
+                    font-weight: {FONT_WEIGHT_INLINE_BOLD};
                 }}
                 tspan.inline-italic {{
                     font-style: italic;

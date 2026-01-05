@@ -18,6 +18,11 @@ Or use [pipx](https://pypa.github.io/pipx/) to install in an isolated environmen
 
     pipx install rmc
 
+To embed remarkable fonts in the output:
+
+    cd ./src/rmc/assets/fonts/
+    ./download_remarkable_fonts.sh
+
 ## Usage
 
 Convert a remarkable v6 file to other formats, specified by `-t FORMAT`:
