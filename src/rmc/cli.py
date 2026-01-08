@@ -20,8 +20,10 @@ import logging
 @click.option("-f", "--from", "from_", metavar="FORMAT", help="Format to convert from (default: guess from filename)")
 @click.option("-t", "--to", metavar="FORMAT", help="Format to convert to (default: guess from filename)")
 @click.option("-o", "--output", type=click.Path(), help="Output filename (default: write to standard out)")
+@click.option("--no-chrome", is_flag=True, help="Use Cairo instead of Chrome for PDF conversion")
+@click.option("--chrome-loc", type=click.Path(), help="Path to Chrome/Chromium binary")
 @click.argument("input", nargs=-1, type=click.Path(exists=True))
-def cli(verbose, from_, to, output, input):
+def cli(verbose, from_, to, output, input, no_chrome, chrome_loc):
     """Convert to/from reMarkable v6 files.
 
     Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
@@ -55,7 +57,7 @@ def cli(verbose, from_, to, output, input):
     if from_ == "rm":
         with open_output(to, output) as fout:
             for fn in input:
-                convert_rm(Path(fn), to, fout)
+                convert_rm(Path(fn), to, fout, no_chrome=no_chrome, chrome_loc=chrome_loc)
     elif from_ == "markdown":
         text = "".join(
             Path(fn).read_text() for fn in input
@@ -116,7 +118,7 @@ def tree_structure(item):
         return item
 
 
-def convert_rm(filename: Path, to, fout):
+def convert_rm(filename: Path, to, fout, no_chrome=False, chrome_loc=None):
     with open(filename, "rb") as f:
         if to == "blocks":
             pprint_blocks(f, fout)
@@ -138,7 +140,7 @@ def convert_rm(filename: Path, to, fout):
             tree = read_tree(f)
             tree_to_svg(tree, buf)
             buf.seek(0)
-            svg_to_pdf(buf, fout)
+            svg_to_pdf(buf, fout, use_chrome=not no_chrome, chrome_loc=chrome_loc)
         else:
             raise click.UsageError("Unknown format %s" % to)
 
