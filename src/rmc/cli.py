@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import click
 from rmscene import read_tree, read_blocks, write_blocks, simple_text_document
-from .exporters.svg import tree_to_svg
+from .exporters.svg import tree_to_svg, DEVICE_PROFILES
 from .exporters.pdf import svg_to_pdf
 from .exporters.markdown import print_text
 
@@ -22,8 +22,9 @@ import logging
 @click.option("-o", "--output", type=click.Path(), help="Output filename (default: write to standard out)")
 @click.option("--no-chrome", is_flag=True, help="Use Cairo instead of Chrome for PDF conversion")
 @click.option("--chrome-loc", type=click.Path(), help="Path to Chrome/Chromium binary")
+@click.option("--device", type=click.Choice(list(DEVICE_PROFILES.keys())), help="Device type (overrides auto-detection)")
 @click.argument("input", nargs=-1, type=click.Path(exists=True))
-def cli(verbose, from_, to, output, input, no_chrome, chrome_loc):
+def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
     """Convert to/from reMarkable v6 files.
 
     Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
@@ -53,6 +54,10 @@ def cli(verbose, from_, to, output, input, no_chrome, chrome_loc):
         if output is None:
             raise click.UsageError("Must specify --output or --to")
         to = guess_format(output)
+
+    if device:
+        from .exporters.svg import set_device
+        set_device(device)
 
     if from_ == "rm":
         with open_output(to, output) as fout:
