@@ -6,6 +6,7 @@ https://github.com/chemag/maxio .
 
 import logging
 import string
+import base64
 import typing as tp
 from pathlib import Path
 
@@ -73,22 +74,106 @@ SOFT_LINE_HEIGHTS = {
     si.ParagraphStyle.CHECKBOX_CHECKED: small_soft_base,
 }
 
-# Estimated character widths per style (fallback values)
-CHAR_WIDTHS = {
-    si.ParagraphStyle.PLAIN: 11,
-    si.ParagraphStyle.BULLET: 11,
-    si.ParagraphStyle.BULLET2: 11,
-    si.ParagraphStyle.BOLD: 12,
-    si.ParagraphStyle.HEADING: 22,
-    si.ParagraphStyle.CHECKBOX: 11,
-    si.ParagraphStyle.CHECKBOX_CHECKED: 11,
+# Font sizes in points (from CSS styles)
+FONT_SIZES_PT = {
+    si.ParagraphStyle.PLAIN: 7.7,
+    si.ParagraphStyle.BULLET: 7.7,
+    si.ParagraphStyle.BULLET2: 7.7,
+    si.ParagraphStyle.BOLD: 8.3,
+    si.ParagraphStyle.HEADING: 15,
+    si.ParagraphStyle.CHECKBOX: 7.7,
+    si.ParagraphStyle.CHECKBOX_CHECKED: 7.7,
 }
 
+# Font metrics - loaded lazily
+_font_metrics: tp.Optional[dict] = None
+
+def _load_font_metrics():
+    """Load font metrics from woff2 files using fonttools."""
+    global _font_metrics
+    if _font_metrics is not None:
+        return _font_metrics
+    
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        _logger.warning("fonttools not available, using estimated character widths")
+        _font_metrics = {}
+        return _font_metrics
+    
+    current_dir = Path(__file__).parent.parent
+    assets = current_dir / "assets"
+    
+    _font_metrics = {}
+    
+    # Load sans font (used for most text)
+    sans_path = assets / "reMarkableSans.woff2"
+    if sans_path.exists():
+        try:
+            sans_font = TTFont(sans_path)
+            _font_metrics['sans'] = {
+                'cmap': sans_font.getBestCmap(),
+                'hmtx': sans_font['hmtx'],
+                'upem': sans_font['head'].unitsPerEm,
+            }
+        except Exception as e:
+            _logger.warning(f"Failed to load sans font: {e}")
+    
+    # Load serif font (used for headings)
+    serif_path = assets / "reMarkableSerif.woff2"
+    if serif_path.exists():
+        try:
+            serif_font = TTFont(serif_path)
+            _font_metrics['serif'] = {
+                'cmap': serif_font.getBestCmap(),
+                'hmtx': serif_font['hmtx'],
+                'upem': serif_font['head'].unitsPerEm,
+            }
+        except Exception as e:
+            _logger.warning(f"Failed to load serif font: {e}")
+    
+    return _font_metrics
+
 def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
-    """Get character width in screen units using estimated widths."""
+    """Get character width in screen units using font metrics."""
     if not char:
         return 0.0
-    return CHAR_WIDTHS.get(style, 11)
+    
+    metrics = _load_font_metrics()
+    
+    is_heading = style == si.ParagraphStyle.HEADING
+    font_key = 'serif' if is_heading else 'sans'
+    
+    if font_key not in metrics:
+        # Fallback to estimated widths
+        fallback_widths = {
+            si.ParagraphStyle.PLAIN: 11,
+            si.ParagraphStyle.BULLET: 11,
+            si.ParagraphStyle.BULLET2: 11,
+            si.ParagraphStyle.BOLD: 12,
+            si.ParagraphStyle.HEADING: 22,
+            si.ParagraphStyle.CHECKBOX: 11,
+            si.ParagraphStyle.CHECKBOX_CHECKED: 11,
+        }
+        return fallback_widths.get(style, 11)
+    
+    font = metrics[font_key]
+    cmap = font['cmap']
+    hmtx = font['hmtx']
+    upem = font['upem']
+    
+    # Get glyph width in font units
+    glyph_name = cmap.get(ord(char))
+    if glyph_name:
+        width_fu = hmtx[glyph_name][0]
+    else:
+        width_fu = 500  # fallback
+    
+    # Convert to screen units: font_units * (font_size_screen / upem)
+    font_size_pt = FONT_SIZES_PT.get(style, 7.7)
+    font_size_screen = font_size_pt * SCREEN_DPI / 72
+    
+    return width_fu * font_size_screen / upem
 
 SVG_HEADER = string.Template("""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" height="$height" width="$width" viewBox="$viewbox">""")
@@ -109,25 +194,25 @@ def read_template_svg(template_path: Path) -> str:
 def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, float, float]:
     """
     Get the bounding box of the text content.
-
+    
     :return: x_min, x_max, y_min, y_max in screen units
     """
     LINE_SEPARATOR = '\u2028'
-
+    
     if text is None:
         return (0, 0, 0, 0)
-
+    
     doc = TextDocument.from_scene_item(text)
     if not doc.contents:
         return (0, 0, 0, 0)
-
+    
     # Calculate y positions the same way draw_text does
     y_offset = TEXT_TOP_Y
     y_positions = []
     for p in doc.contents:
         y_offset += LINE_HEIGHTS.get(p.style.value, 70)
         y_positions.append(text.pos_y + y_offset)
-
+        
         # Account for soft line breaks
         content = str(p)
         num_soft_breaks = content.count(LINE_SEPARATOR)
@@ -135,20 +220,20 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
             soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += num_soft_breaks * soft_line_height
             y_positions.append(text.pos_y + y_offset)
-
+        
         # Account for space after
         space_after = SPACE_AFTER.get(p.style.value, 0)
         if space_after > 0:
             y_offset += space_after
-
+    
     # Text starts at pos_x and extends to pos_x + width
     x_min = text.pos_x
     x_max = text.pos_x + text.width
-
+    
     # Y range from first to last text line (with some padding for text height)
     y_min = y_positions[0] - 50  # approximate text ascent
     y_max = y_positions[-1] + 20  # approximate text descent
-
+    
     return (x_min, x_max, y_min, y_max)
 
 
@@ -167,7 +252,7 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
 
     # find the extremum along x and y (for strokes)
     x_min, x_max, y_min, y_max = get_bounding_box(tree.root, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
-
+    
     # Also include text bounds
     txt_x_min, txt_x_max, txt_y_min, txt_y_max = get_text_bounding_box(tree.root_text)
     if tree.root_text is not None:
@@ -175,7 +260,7 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
         x_max = max(x_max, txt_x_max)
         y_min = min(y_min, txt_y_min)
         y_max = max(y_max, txt_y_max)
-
+    
     width_pt = xx(x_max - x_min + 1)
     height_pt = yy(y_max - y_min + 1)
     _logger.debug("x_min, x_max, y_min, y_max: %.1f, %.1f, %.1f, %.1f ; scalded %.1f, %.1f, %.1f, %.1f",
@@ -217,19 +302,19 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
         - anchor_soft_offset maps CrdtId -> soft line offset applied to that character
     """
     LINE_SEPARATOR = '\u2028'
-
+    
     # Start with placeholder values for special anchors - will be updated below
     anchor_pos = {
         CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID): 100,
         CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID): 100,
     }
-
+    
     # Track newline anchors and their line height offset
     newline_offsets: tp.Dict[CrdtId, int] = {}
-
+    
     # Track X positions for each character
     anchor_x_pos: tp.Dict[CrdtId, float] = {}
-
+    
     # Track soft line offset for each character
     anchor_soft_offset: tp.Dict[CrdtId, float] = {}
 
@@ -237,49 +322,49 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
         doc = TextDocument.from_scene_item(text)
         y_offset = TEXT_TOP_Y
         last_content_y_offset = TEXT_TOP_Y
-
+        
         for i, p in enumerate(doc.contents):
             line_height = LINE_HEIGHTS.get(p.style.value, 70)
             soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += line_height
             ypos = text.pos_y + y_offset
-
+            
             anchor_pos[p.start_id] = ypos
-
+            
             if i > 0:
                 newline_offsets[p.start_id] = line_height
-
+            
             # Track character positions
             current_soft_offset = 0
             cumulative_x = 0.0
-
+            
             for subp in p.contents:
                 for j, k in enumerate(subp.i):
                     anchor_pos[k] = ypos + current_soft_offset
                     anchor_x_pos[k] = text.pos_x + cumulative_x
                     anchor_soft_offset[k] = current_soft_offset
-
+                    
                     char = subp.s[j] if j < len(subp.s) else ''
                     if char == LINE_SEPARATOR:
                         current_soft_offset += soft_line_height
                         cumulative_x = 0.0  # Reset X for new line
                     else:
                         cumulative_x += get_char_width_screen(char, p.style.value)
-
+            
             content = str(p)
             num_soft_breaks = content.count(LINE_SEPARATOR)
             if num_soft_breaks > 0:
                 y_offset += num_soft_breaks * soft_line_height
-
+            
             # Add extra space after certain paragraph styles (e.g., headings)
             space_after = SPACE_AFTER.get(p.style.value, 0)
             if space_after > 0:
                 y_offset += space_after
-
+            
             visible_content = content.replace(LINE_SEPARATOR, '').strip()
             if visible_content:
                 last_content_y_offset = y_offset
-
+ 
         if doc.contents:
             first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
             anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
@@ -291,7 +376,7 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
 def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
     """
     Get the anchor position for a group.
-
+    
     :param item: The group to get anchor for
     :param anchor_pos: Map of CrdtId -> y position
     :param newline_offsets: Map of newline CrdtIds -> offset to subtract
@@ -305,13 +390,13 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
         anchor_x_pos = {}
     if anchor_soft_offset is None:
         anchor_soft_offset = {}
-
+        
     anchor_x = 0.0
     anchor_y = 0.0
     if item.anchor_id is not None:
         assert item.anchor_origin_x is not None
         anchor_x = item.anchor_origin_x.value
-
+        
         # For TEXT_CHAR anchors (anchor_type=1) with anchor_origin_x=0,
         # use the computed character X position
         if item.anchor_type is not None and item.anchor_type.value == 1 and anchor_x == 0:
@@ -322,10 +407,10 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
             elif text_pos_x is not None:
                 anchor_x = text_pos_x
                 _logger.debug("TEXT_CHAR anchor: fallback to text_pos_x=%.1f", text_pos_x)
-
+        
         if item.anchor_id.value in anchor_pos:
             anchor_y = anchor_pos[item.anchor_id.value]
-
+            
             # For TEXT_CHAR anchors, subtract excess soft offset beyond first line
             # This is because stroke coordinates are relative to the first content line,
             # not the specific soft line the anchor character is on
@@ -339,7 +424,7 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
                     anchor_y -= excess
                     _logger.debug("TEXT_CHAR anchor: subtracting excess soft_offset=%.1f for %s",
                                   excess, item.anchor_id.value)
-
+            
             if item.anchor_id.value in newline_offsets:
                 anchor_y -= newline_offsets[item.anchor_id.value]
                 _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %d)",
@@ -367,7 +452,7 @@ def get_bounding_box(item: si.Group,
         anchor_x_pos = {}
     if anchor_soft_offset is None:
         anchor_soft_offset = {}
-
+        
     x_min, x_max, y_min, y_max = default
 
     for child_id in item.children:
@@ -451,20 +536,50 @@ def draw_stroke(item: si.Line, output):
 def draw_text(text: si.Text, output):
     output.write('\t\t<g class="root-text" style="display:inline">')
 
-    # add some style to get readable text
-    output.write('''
-            <style>
-                text.heading {
-                    font: 14pt serif;
-                }
-                text.bold {
-                    font: 8pt sans-serif bold;
-                }
-                text, text.plain {
-                    font: 7pt sans-serif;
-                }
-            </style>
-''')
+    current_dir = Path(__file__).parent.parent
+    assets = current_dir / "assets" 
+
+    remarkable_serif_woff2 = assets / 'reMarkableSerif.woff2'
+    remarkable_serif = "reMarkable Serif VF"
+    remarkable_serif_data = remarkable_serif_woff2.read_bytes()
+    remarkable_serif_b64 = base64.b64encode(remarkable_serif_data).decode("ascii")
+
+    remarkable_sans_woff2 = assets / 'reMarkableSans.woff2'
+    remarkable_sans = "reMarkable Sans VF"
+    remarkable_sans_data = remarkable_sans_woff2.read_bytes()
+    remarkable_sans_b64 = base64.b64encode(remarkable_sans_data).decode("ascii")
+
+    output.write(f'''
+            <style><![CDATA[
+                @font-face {{
+                  font-family: "{remarkable_serif}";
+                  src: url("data:font/woff2;base64,{remarkable_serif_b64}") format("woff2");
+                  font-style: normal;
+                  font-weight: 300 800;
+                }}
+                @font-face {{
+                  font-family: "{remarkable_sans}";
+                  src: url("data:font/woff2;base64,{remarkable_sans_b64}") format("woff2");
+                  font-style: normal;
+                  font-weight: 300 700;
+                }}
+                text.heading {{
+                    font-family: "{remarkable_serif}", serif;
+                    font-size: 15pt;
+                    font-weight: 400; 
+                }}
+                text.bold {{
+                    font-family: "{remarkable_sans}", sans-serif;
+                    font-size: 8.3pt;
+                    font-weight: 500; 
+                }}
+                text, text.plain {{
+                    font-family: "{remarkable_sans}", sans-serif;
+                    font-size: 7.7pt;
+                    font-weight: 400;
+                }}
+            ]]></style>
+    ''')
 
     LINE_SEPARATOR = '\u2028'
     y_offset = TEXT_TOP_Y
@@ -479,7 +594,7 @@ def draw_text(text: si.Text, output):
         ypos = text.pos_y + y_offset
         cls = p.style.value.name.lower()
         content = str(p)
-
+        
         lines = content.split(LINE_SEPARATOR)
         line_offset = 0
         for line_content in lines:
@@ -489,14 +604,14 @@ def draw_text(text: si.Text, output):
                 line_ypos = ypos + (line_offset * soft_line_height)
                 output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(line_ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(line_content)}</text>\n')
             line_offset += 1
-
+        
         extra_lines = len(lines) - 1
         if extra_lines > 0:
             y_offset += extra_lines * soft_line_height
-
+        
         # Add extra space after certain paragraph styles (e.g., headings)
         space_after = SPACE_AFTER.get(p.style.value, 0)
         if space_after > 0:
             y_offset += space_after
-
+    
     output.write('\t\t</g>\n')
