@@ -18,11 +18,16 @@ from xml.etree.ElementTree import _escape_attrib
 
 from .writing_tools import Pen
 
+from .. import ASSETS
+
 _logger = logging.getLogger(__name__)
 
 SCREEN_WIDTH = 1404
 SCREEN_HEIGHT = 1872
 SCREEN_DPI = 226
+
+# Margin to add around content bounding box (in screen units)
+BBOX_MARGIN = 50
 
 TEXT_DOCUMENT_TOP_Y_CRDT_ID = 0xfffffffffffe
 TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID = 0xffffffffffff
@@ -33,6 +38,30 @@ PAGE_WIDTH_PT = SCREEN_WIDTH * SCALE
 PAGE_HEIGHT_PT = SCREEN_HEIGHT * SCALE
 X_SHIFT = PAGE_WIDTH_PT // 2
 
+
+# Checkbox positioning constants (used in both build_anchor_pos and draw_text)
+CHECKBOX_SIZE = 12  # Size in points
+CHECKBOX_TEXT_GAP = 4  # Gap between checkbox and text in points
+CHECKBOX_ITEM_SPACING = 30  # Extra spacing between checkbox items in screen units
+CHECKBOX2_INDENT = 12  # Indentation for nested checkbox in points
+
+# Bullet list positioning constants
+BULLET_SIZE = 4  # Bullet circle diameter in points
+BULLET_INDENT = 12  # Indentation for bullet text in points
+BULLET2_INDENT = 24  # Indentation for nested bullet text in points
+BULLET_GAP = 6  # Gap between bullet and text in points
+BULLET_ITEM_SPACING = 20  # Extra spacing between bullet items in screen units
+BULLET_SECTION_GAP = 30  # Gap before bullet section starts (from non-bullet paragraph)
+
+# Numbered list constants
+NUMBERED_INDENT = 12  # Indentation for numbered list text in points (matching BULLET_INDENT)
+NUMBERED2_INDENT = 24  # Indentation for nested numbered list text in points (matching BULLET2_INDENT)
+NUMBERED_GAP = 4  # Gap between number and text in points
+NUMBERED2_OFFSET = 12  # Offset for nested numbered list number position
+
+# Text wrap margin - the device appears to use less than the full text.width
+# for line wrapping. This margin is subtracted from text.width.
+TEXT_WRAP_MARGIN = 236  # Approximate margin in screen units
 
 def scale(screen_unit: float) -> float:
     return screen_unit * SCALE
@@ -52,6 +81,10 @@ LINE_HEIGHTS = {
     si.ParagraphStyle.HEADING: base*2,
     si.ParagraphStyle.CHECKBOX: base/2,
     si.ParagraphStyle.CHECKBOX_CHECKED: base/2,
+    si.ParagraphStyle.CHECKBOX2: base/2,
+    si.ParagraphStyle.CHECKBOX2_CHECKED: base/2,
+    si.ParagraphStyle.NUMBERED: base/2,
+    si.ParagraphStyle.NUMBERED2: base/2,
 }
 
 # Extra space to add AFTER certain paragraph styles
@@ -72,6 +105,10 @@ SOFT_LINE_HEIGHTS = {
     si.ParagraphStyle.HEADING: soft_base,
     si.ParagraphStyle.CHECKBOX: small_soft_base,
     si.ParagraphStyle.CHECKBOX_CHECKED: small_soft_base,
+    si.ParagraphStyle.CHECKBOX2: small_soft_base,
+    si.ParagraphStyle.CHECKBOX2_CHECKED: small_soft_base,
+    si.ParagraphStyle.NUMBERED: small_soft_base,
+    si.ParagraphStyle.NUMBERED2: small_soft_base,
 }
 
 # Font sizes in points (from CSS styles)
@@ -83,6 +120,10 @@ FONT_SIZES_PT = {
     si.ParagraphStyle.HEADING: 15,
     si.ParagraphStyle.CHECKBOX: 7.7,
     si.ParagraphStyle.CHECKBOX_CHECKED: 7.7,
+    si.ParagraphStyle.CHECKBOX2: 7.7,
+    si.ParagraphStyle.CHECKBOX2_CHECKED: 7.7,
+    si.ParagraphStyle.NUMBERED: 7.7,
+    si.ParagraphStyle.NUMBERED2: 7.7,
 }
 
 # Font metrics - loaded lazily
@@ -154,6 +195,10 @@ def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
             si.ParagraphStyle.HEADING: 22,
             si.ParagraphStyle.CHECKBOX: 11,
             si.ParagraphStyle.CHECKBOX_CHECKED: 11,
+            si.ParagraphStyle.CHECKBOX2: 11,
+            si.ParagraphStyle.CHECKBOX2_CHECKED: 11,
+            si.ParagraphStyle.NUMBERED: 11,
+            si.ParagraphStyle.NUMBERED2: 11,
         }
         return fallback_widths.get(style, 11)
     
@@ -174,6 +219,75 @@ def get_char_width_screen(char: str, style: si.ParagraphStyle) -> float:
     font_size_screen = font_size_pt * SCREEN_DPI / 72
     
     return width_fu * font_size_screen / upem
+
+
+def get_text_width_screen(text: str, style: si.ParagraphStyle) -> float:
+    """Get total width of text string in screen units."""
+    return sum(get_char_width_screen(c, style) for c in text)
+
+
+def wrap_text_to_width(text: str, max_width: float, style: si.ParagraphStyle) -> tp.List[str]:
+    """
+    Wrap text to fit within max_width, breaking at word boundaries.
+    Preserves leading whitespace on the first line.
+    
+    :param text: The text to wrap
+    :param max_width: Maximum width in screen units
+    :param style: Paragraph style (affects character widths)
+    :return: List of lines
+    """
+    if not text:
+        return ['']
+    
+    # Preserve leading whitespace
+    leading_spaces = ''
+    stripped_text = text.lstrip(' ')
+    if len(stripped_text) < len(text):
+        leading_spaces = text[:len(text) - len(stripped_text)]
+    
+    # Now wrap the stripped text
+    words = stripped_text.split(' ')
+    lines = []
+    current_line = ''
+    current_width = 0.0
+    space_width = get_char_width_screen(' ', style)
+    
+    # Account for leading spaces in the first line's width
+    leading_width = get_text_width_screen(leading_spaces, style) if leading_spaces else 0.0
+    first_line = True
+    
+    for word in words:
+        if not word:  # Skip empty strings from consecutive spaces
+            continue
+            
+        word_width = get_text_width_screen(word, style)
+        
+        if current_line:
+            # Check if adding this word (with space) would exceed width
+            test_width = current_width + space_width + word_width
+            if test_width <= max_width:
+                current_line += ' ' + word
+                current_width = test_width
+            else:
+                # Start new line
+                lines.append(current_line)
+                current_line = word
+                current_width = word_width
+                first_line = False
+        else:
+            # First word on line
+            if first_line and leading_spaces:
+                current_line = leading_spaces + word
+                current_width = leading_width + word_width
+            else:
+                current_line = word
+                current_width = word_width
+    
+    # Don't forget the last line
+    if current_line:
+        lines.append(current_line)
+    
+    return lines if lines else ['']
 
 SVG_HEADER = string.Template("""<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" height="$height" width="$width" viewBox="$viewbox">""")
@@ -206,25 +320,89 @@ def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, 
     if not doc.contents:
         return (0, 0, 0, 0)
     
+    # Define which styles are "list" styles (must match draw_text)
+    LIST_STYLES = {
+        si.ParagraphStyle.BULLET,
+        si.ParagraphStyle.BULLET2,
+        si.ParagraphStyle.CHECKBOX,
+        si.ParagraphStyle.CHECKBOX_CHECKED,
+        si.ParagraphStyle.CHECKBOX2,
+        si.ParagraphStyle.CHECKBOX2_CHECKED,
+        si.ParagraphStyle.NUMBERED,
+        si.ParagraphStyle.NUMBERED2,
+    }
+    
     # Calculate y positions the same way draw_text does
     y_offset = TEXT_TOP_Y
     y_positions = []
+    prev_style = None
     for p in doc.contents:
+        # Add section gap when transitioning from non-list to list style (must match draw_text)
+        is_list_style = p.style.value in LIST_STYLES
+        was_list_style = prev_style in LIST_STYLES if prev_style else False
+        if is_list_style and not was_list_style and prev_style is not None:
+            y_offset += BULLET_SECTION_GAP
+        
         y_offset += LINE_HEIGHTS.get(p.style.value, 70)
         y_positions.append(text.pos_y + y_offset)
         
         # Account for soft line breaks
         content = str(p)
         num_soft_breaks = content.count(LINE_SEPARATOR)
+        soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
         if num_soft_breaks > 0:
-            soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
             y_offset += num_soft_breaks * soft_line_height
+            y_positions.append(text.pos_y + y_offset)
+        
+        # Account for line wrapping
+        available_width = text.width - TEXT_WRAP_MARGIN
+        is_checkbox = p.style.value in (si.ParagraphStyle.CHECKBOX, si.ParagraphStyle.CHECKBOX_CHECKED)
+        is_checkbox2 = p.style.value in (si.ParagraphStyle.CHECKBOX2, si.ParagraphStyle.CHECKBOX2_CHECKED)
+        is_bullet = p.style.value == si.ParagraphStyle.BULLET
+        is_bullet2 = p.style.value == si.ParagraphStyle.BULLET2
+        is_numbered = p.style.value == si.ParagraphStyle.NUMBERED
+        is_numbered2 = p.style.value == si.ParagraphStyle.NUMBERED2
+        if is_checkbox:
+            available_width -= (CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+        elif is_checkbox2:
+            available_width -= (CHECKBOX2_INDENT + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+        elif is_bullet:
+            available_width -= BULLET_INDENT / SCALE
+        elif is_bullet2:
+            available_width -= BULLET2_INDENT / SCALE
+        elif is_numbered:
+            available_width -= NUMBERED_INDENT / SCALE
+        elif is_numbered2:
+            available_width -= NUMBERED2_INDENT / SCALE
+        
+        segments = content.split(LINE_SEPARATOR)
+        total_wrapped_lines = 0
+        for segment in segments:
+            if segment.strip():
+                wrapped = wrap_text_to_width(segment, available_width, p.style.value)
+                total_wrapped_lines += len(wrapped)
+            else:
+                total_wrapped_lines += 1
+        
+        extra_wrapped_lines = total_wrapped_lines - len(segments)
+        if extra_wrapped_lines > 0:
+            y_offset += extra_wrapped_lines * soft_line_height
             y_positions.append(text.pos_y + y_offset)
         
         # Account for space after
         space_after = SPACE_AFTER.get(p.style.value, 0)
         if space_after > 0:
             y_offset += space_after
+        
+        # Account for checkbox item spacing
+        if is_checkbox or is_checkbox2:
+            y_offset += CHECKBOX_ITEM_SPACING
+        
+        # Account for bullet/numbered list item spacing
+        if is_bullet or is_bullet2 or is_numbered or is_numbered2:
+            y_offset += BULLET_ITEM_SPACING
+        
+        prev_style = p.style.value
     
     # Text starts at pos_x and extends to pos_x + width
     x_min = text.pos_x
@@ -260,6 +438,12 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
         x_max = max(x_max, txt_x_max)
         y_min = min(y_min, txt_y_min)
         y_max = max(y_max, txt_y_max)
+    
+    # Add margin around content
+    x_min -= BBOX_MARGIN
+    x_max += BBOX_MARGIN
+    y_min -= BBOX_MARGIN
+    y_max += BBOX_MARGIN
     
     width_pt = xx(x_max - x_min + 1)
     height_pt = yy(y_max - y_min + 1)
@@ -297,7 +481,7 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
     :param text: the root text of the remarkable file
     :return: (anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset) where:
         - anchor_pos maps CrdtId -> y position (includes soft line offset)
-        - newline_offsets maps newline CrdtIds -> offset to subtract (one line height)
+        - newline_offsets maps newline CrdtIds -> offset to subtract (line height + prev SPACE_AFTER)
         - anchor_x_pos maps CrdtId -> x position (for all characters)
         - anchor_soft_offset maps CrdtId -> soft line offset applied to that character
     """
@@ -322,17 +506,40 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
         doc = TextDocument.from_scene_item(text)
         y_offset = TEXT_TOP_Y
         last_content_y_offset = TEXT_TOP_Y
+        prev_style = None
+        
+        # Define which styles are "list" styles (must match draw_text)
+        LIST_STYLES = {
+            si.ParagraphStyle.BULLET,
+            si.ParagraphStyle.BULLET2,
+            si.ParagraphStyle.CHECKBOX,
+            si.ParagraphStyle.CHECKBOX_CHECKED,
+            si.ParagraphStyle.CHECKBOX2,
+            si.ParagraphStyle.CHECKBOX2_CHECKED,
+            si.ParagraphStyle.NUMBERED,
+            si.ParagraphStyle.NUMBERED2,
+        }
         
         for i, p in enumerate(doc.contents):
             line_height = LINE_HEIGHTS.get(p.style.value, 70)
             soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
+            
+            # Add section gap when transitioning from non-list to list style (must match draw_text)
+            is_list_style = p.style.value in LIST_STYLES
+            was_list_style = prev_style in LIST_STYLES if prev_style else False
+            if is_list_style and not was_list_style and prev_style is not None:
+                y_offset += BULLET_SECTION_GAP
+            
             y_offset += line_height
             ypos = text.pos_y + y_offset
             
             anchor_pos[p.start_id] = ypos
             
             if i > 0:
-                newline_offsets[p.start_id] = line_height
+                # Include SPACE_AFTER from previous paragraph in the offset
+                # This accounts for extra spacing after headings, etc.
+                prev_space_after = SPACE_AFTER.get(prev_style, 0)
+                newline_offsets[p.start_id] = line_height + prev_space_after
             
             # Track character positions
             current_soft_offset = 0
@@ -356,14 +563,61 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Tuple[tp.Dict[CrdtId, int
             if num_soft_breaks > 0:
                 y_offset += num_soft_breaks * soft_line_height
             
+            # Calculate extra lines from word wrapping (must match draw_text)
+            # Split content by LINE_SEPARATOR first, then wrap each segment
+            available_width = text.width - TEXT_WRAP_MARGIN
+            is_checkbox = p.style.value in (si.ParagraphStyle.CHECKBOX, si.ParagraphStyle.CHECKBOX_CHECKED)
+            is_checkbox2 = p.style.value in (si.ParagraphStyle.CHECKBOX2, si.ParagraphStyle.CHECKBOX2_CHECKED)
+            is_bullet = p.style.value == si.ParagraphStyle.BULLET
+            is_bullet2 = p.style.value == si.ParagraphStyle.BULLET2
+            is_numbered = p.style.value == si.ParagraphStyle.NUMBERED
+            is_numbered2 = p.style.value == si.ParagraphStyle.NUMBERED2
+            if is_checkbox:
+                available_width -= (CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+            elif is_checkbox2:
+                available_width -= (CHECKBOX2_INDENT + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+            elif is_bullet:
+                available_width -= BULLET_INDENT / SCALE
+            elif is_bullet2:
+                available_width -= BULLET2_INDENT / SCALE
+            elif is_numbered:
+                available_width -= NUMBERED_INDENT / SCALE
+            elif is_numbered2:
+                available_width -= NUMBERED2_INDENT / SCALE
+            
+            segments = content.split(LINE_SEPARATOR)
+            total_wrapped_lines = 0
+            for segment in segments:
+                if segment.strip():
+                    wrapped = wrap_text_to_width(segment, available_width, p.style.value)
+                    total_wrapped_lines += len(wrapped)
+                else:
+                    total_wrapped_lines += 1  # Empty segment counts as one line
+            
+            # Extra wrapped lines beyond the soft breaks (first line of each segment is already counted)
+            num_segments = len(segments)
+            extra_wrapped_lines = total_wrapped_lines - num_segments
+            if extra_wrapped_lines > 0:
+                y_offset += extra_wrapped_lines * soft_line_height
+            
             # Add extra space after certain paragraph styles (e.g., headings)
             space_after = SPACE_AFTER.get(p.style.value, 0)
             if space_after > 0:
                 y_offset += space_after
             
+            # Add spacing after checkbox items (must match draw_text)
+            if is_checkbox or is_checkbox2:
+                y_offset += CHECKBOX_ITEM_SPACING
+            
+            # Add spacing after bullet/numbered list items (must match draw_text)
+            if is_bullet or is_bullet2 or is_numbered or is_numbered2:
+                y_offset += BULLET_ITEM_SPACING
+            
             visible_content = content.replace(LINE_SEPARATOR, '').strip()
             if visible_content:
                 last_content_y_offset = y_offset
+            
+            prev_style = p.style.value
  
         if doc.contents:
             first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
@@ -411,6 +665,12 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
         if item.anchor_id.value in anchor_pos:
             anchor_y = anchor_pos[item.anchor_id.value]
             
+            # NOTE: anchor_threshold exists but we don't apply it uniformly.
+            # The threshold value (typically ~35.7) seems to be a baseline offset,
+            # but applying it causes misalignment in various cases.
+            # For now, we don't apply threshold - elements align with their anchor Y directly.
+            # TODO: Determine correct rule for when threshold should be applied.
+            
             # For TEXT_CHAR anchors, subtract excess soft offset beyond first line
             # This is because stroke coordinates are relative to the first content line,
             # not the specific soft line the anchor character is on
@@ -427,7 +687,7 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
             
             if item.anchor_id.value in newline_offsets:
                 anchor_y -= newline_offsets[item.anchor_id.value]
-                _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %d)",
+                _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %.1f)",
                               item.anchor_id.value, anchor_y, newline_offsets[item.anchor_id.value])
             else:
                 _logger.debug("Group anchor: %s -> y=%.1f", item.anchor_id.value, anchor_y)
@@ -536,15 +796,12 @@ def draw_stroke(item: si.Line, output):
 def draw_text(text: si.Text, output):
     output.write('\t\t<g class="root-text" style="display:inline">')
 
-    current_dir = Path(__file__).parent.parent
-    assets = current_dir / "assets" 
-
-    remarkable_serif_woff2 = assets / 'reMarkableSerif.woff2'
+    remarkable_serif_woff2 = ASSETS / 'reMarkableSerif.woff2'
     remarkable_serif = "reMarkable Serif VF"
     remarkable_serif_data = remarkable_serif_woff2.read_bytes()
     remarkable_serif_b64 = base64.b64encode(remarkable_serif_data).decode("ascii")
 
-    remarkable_sans_woff2 = assets / 'reMarkableSans.woff2'
+    remarkable_sans_woff2 = ASSETS / 'reMarkableSans.woff2'
     remarkable_sans = "reMarkable Sans VF"
     remarkable_sans_data = remarkable_sans_woff2.read_bytes()
     remarkable_sans_b64 = base64.b64encode(remarkable_sans_data).decode("ascii")
@@ -573,45 +830,323 @@ def draw_text(text: si.Text, output):
                     font-size: 8.3pt;
                     font-weight: 500; 
                 }}
-                text, text.plain {{
+                text, text.plain, text.basic {{
                     font-family: "{remarkable_sans}", sans-serif;
                     font-size: 7.7pt;
                     font-weight: 400;
                 }}
+                text.bullet, text.bullet2 {{
+                    font-family: "{remarkable_sans}", sans-serif;
+                    font-size: 7.7pt;
+                    font-weight: 400;
+                }}
+                text.checkbox, text.checkbox_checked, text.checkbox2, text.checkbox2_checked {{
+                    font-family: "{remarkable_sans}", sans-serif;
+                    font-size: 7.7pt;
+                    font-weight: 400;
+                }}
+                text.checkbox_checked, text.checkbox2_checked {{
+                    text-decoration: line-through;
+                }}
+                text.numbered, text.numbered2 {{
+                    font-family: "{remarkable_sans}", sans-serif;
+                    font-size: 7.7pt;
+                    font-weight: 400;
+                }}
+                tspan.inline-bold {{
+                    font-weight: 700;
+                }}
+                tspan.inline-italic {{
+                    font-style: italic;
+                }}
             ]]></style>
+            <defs>
+                <symbol id="checkbox-unchecked" viewBox="0 0 40 40">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M32,4l4,4v28H8l-4-4V4H32z M6,6h24v24H6V6z"/>
+                </symbol>
+                <symbol id="checkbox-checked" viewBox="0 0 40 40">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M36,8H8v28h28V8z M12,24l7,6l13-14l-2-2L19,26l-5-4L12,24z"/>
+                </symbol>
+                <symbol id="bullet" viewBox="0 0 10 10">
+                    <circle cx="5" cy="5" r="4" fill="currentColor"/>
+                </symbol>
+                <symbol id="bullet2" viewBox="0 0 10 10">
+                    <line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" stroke-width="2"/>
+                </symbol>
+            </defs>
     ''')
 
     LINE_SEPARATOR = '\u2028'
     y_offset = TEXT_TOP_Y
+    
+    # Track previous style for section gaps and numbered list counters
+    prev_style = None
+    numbered_counter = 0
+    numbered2_counter = 0
+    
+    # Define which styles are "list" styles (bullet, numbered)
+    LIST_STYLES = {
+        si.ParagraphStyle.BULLET,
+        si.ParagraphStyle.BULLET2,
+        si.ParagraphStyle.CHECKBOX,
+        si.ParagraphStyle.CHECKBOX_CHECKED,
+        si.ParagraphStyle.CHECKBOX2,
+        si.ParagraphStyle.CHECKBOX2_CHECKED,
+        si.ParagraphStyle.NUMBERED,
+        si.ParagraphStyle.NUMBERED2,
+    }
 
     doc = TextDocument.from_scene_item(text)
-    for p in doc.contents:
+    for p_idx, p in enumerate(doc.contents):
         line_height = LINE_HEIGHTS.get(p.style.value, 70)
         soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
+        
+        # Add section gap when transitioning from non-list to list style
+        is_list_style = p.style.value in LIST_STYLES
+        was_list_style = prev_style in LIST_STYLES if prev_style else False
+        if is_list_style and not was_list_style and prev_style is not None:
+            y_offset += BULLET_SECTION_GAP
+        
+        # Manage numbered list counters
+        if p.style.value == si.ParagraphStyle.NUMBERED:
+            # Reset counter if previous wasn't NUMBERED
+            if prev_style != si.ParagraphStyle.NUMBERED:
+                numbered_counter = 0
+            numbered_counter += 1
+        elif p.style.value == si.ParagraphStyle.NUMBERED2:
+            # Reset counter if previous wasn't NUMBERED2
+            if prev_style != si.ParagraphStyle.NUMBERED2:
+                numbered2_counter = 0
+            numbered2_counter += 1
+        
         y_offset += line_height
 
         xpos = text.pos_x
         ypos = text.pos_y + y_offset
-        cls = p.style.value.name.lower()
-        content = str(p)
+        style_name = p.style.value.name.lower()
         
-        lines = content.split(LINE_SEPARATOR)
+        # Draw checkbox symbol for checkbox styles
+        is_checkbox = p.style.value in (si.ParagraphStyle.CHECKBOX, si.ParagraphStyle.CHECKBOX_CHECKED)
+        is_checkbox2 = p.style.value in (si.ParagraphStyle.CHECKBOX2, si.ParagraphStyle.CHECKBOX2_CHECKED)
+        is_checked = p.style.value in (si.ParagraphStyle.CHECKBOX_CHECKED, si.ParagraphStyle.CHECKBOX2_CHECKED)
+        
+        # Check for bullet styles
+        is_bullet = p.style.value == si.ParagraphStyle.BULLET
+        is_bullet2 = p.style.value == si.ParagraphStyle.BULLET2
+        
+        # Check for numbered list styles
+        is_numbered = p.style.value == si.ParagraphStyle.NUMBERED
+        is_numbered2 = p.style.value == si.ParagraphStyle.NUMBERED2
+        
+        # Adjust text position for checkbox items
+        text_xpos = xpos
+        if is_checkbox or is_checkbox2:
+            checkbox_id = "checkbox-checked" if is_checked else "checkbox-unchecked"
+            # Position checkbox - indent for CHECKBOX2
+            checkbox_offset = CHECKBOX2_INDENT if is_checkbox2 else 0
+            checkbox_x = xx(xpos) + checkbox_offset
+            checkbox_y = yy(ypos) - CHECKBOX_SIZE + 2  # Align with text baseline
+            output.write(f'\t\t\t<use href="#{checkbox_id}" x="{checkbox_x}" y="{checkbox_y}" '
+                        f'width="{CHECKBOX_SIZE}" height="{CHECKBOX_SIZE}"/>\n')
+            # Push text to the right of checkbox
+            text_xpos = xpos + (checkbox_offset + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+        elif is_bullet or is_bullet2:
+            # Determine indentation and bullet style
+            indent = BULLET_INDENT if is_bullet else BULLET2_INDENT
+            bullet_id = "bullet" if is_bullet else "bullet2"
+            
+            # Position bullet before text
+            bullet_x = xx(xpos) + indent - BULLET_SIZE - BULLET_GAP
+            bullet_y = yy(ypos) - BULLET_SIZE / 2 - 1  # Center vertically with text
+            output.write(f'\t\t\t<use href="#{bullet_id}" x="{bullet_x}" y="{bullet_y}" '
+                        f'width="{BULLET_SIZE}" height="{BULLET_SIZE}"/>\n')
+            # Indent text
+            text_xpos = xpos + indent / SCALE
+        elif is_numbered or is_numbered2:
+            # Determine indentation and counter
+            indent = NUMBERED_INDENT if is_numbered else NUMBERED2_INDENT
+            counter = numbered_counter if is_numbered else numbered2_counter
+            number_text = f"{counter}."
+            
+            # Render the number as text
+            # For NUMBERED2, offset the number position to show nesting
+            number_offset = 0 if is_numbered else NUMBERED2_OFFSET
+            number_x = xx(xpos) + number_offset
+            number_y = yy(ypos)
+            output.write(f'\t\t\t<text x="{number_x}" y="{number_y}" class="{style_name}" xml:space="preserve">{number_text}</text>\n')
+            # Indent text after number
+            text_xpos = xpos + indent / SCALE
+        
+        # Render text with inline formatting support
+        # First, collect all text segments with their formatting
+        all_segments = []
+        for subp in p.contents:
+            props = getattr(subp, 'properties', {})
+            is_bold = props.get('font-weight') == 'bold'
+            is_italic = props.get('font-style') == 'italic'
+            
+            text_content = str(subp)
+            
+            # Split by LINE_SEPARATOR but keep track of segments
+            parts = text_content.split(LINE_SEPARATOR)
+            for i, part in enumerate(parts):
+                if part:
+                    all_segments.append({
+                        'text': part,
+                        'bold': is_bold,
+                        'italic': is_italic,
+                        'newline_after': False
+                    })
+                if i < len(parts) - 1:
+                    # Mark that a newline follows
+                    if all_segments:
+                        all_segments[-1]['newline_after'] = True
+                    else:
+                        # Empty line at start
+                        all_segments.append({
+                            'text': '',
+                            'bold': False,
+                            'italic': False,
+                            'newline_after': True
+                        })
+        
+        # Now group segments into lines
+        lines = []
+        current_line = []
+        for seg in all_segments:
+            if seg['text']:
+                current_line.append(seg)
+            if seg['newline_after']:
+                lines.append(current_line)
+                current_line = []
+        if current_line:
+            lines.append(current_line)
+        
         line_offset = 0
-        for line_content in lines:
-            if line_content.strip():
-                if _logger.root.level == logging.DEBUG:
-                    output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} offset {line_offset} -->\n')
-                line_ypos = ypos + (line_offset * soft_line_height)
-                output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(line_ypos)}" class="{cls}" xml:space="preserve">{_escape_attrib(line_content)}</text>\n')
-            line_offset += 1
+        wrapped_line_count = 0  # Track total wrapped lines for y_offset
         
-        extra_lines = len(lines) - 1
-        if extra_lines > 0:
-            y_offset += extra_lines * soft_line_height
+        for line_parts in lines:
+            # Skip empty lines
+            full_text = ''.join(part['text'] for part in line_parts)
+            if not full_text.strip():
+                line_offset += 1
+                wrapped_line_count += 1
+                continue
+            
+            # Check if we need tspans (for inline formatting)
+            needs_tspans = any(part['bold'] or part['italic'] for part in line_parts)
+            
+            # Apply word wrapping based on available width
+            available_width = text.width - TEXT_WRAP_MARGIN
+            if is_checkbox:
+                # Reduce available width by checkbox space
+                available_width -= (CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+            elif is_checkbox2:
+                # Reduce available width by indented checkbox space
+                available_width -= (CHECKBOX2_INDENT + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / SCALE
+            elif is_bullet:
+                # Reduce available width by bullet indent
+                available_width -= BULLET_INDENT / SCALE
+            elif is_bullet2:
+                # Reduce available width by nested bullet indent
+                available_width -= BULLET2_INDENT / SCALE
+            elif is_numbered:
+                # Reduce available width by numbered list indent
+                available_width -= NUMBERED_INDENT / SCALE
+            elif is_numbered2:
+                # Reduce available width by nested numbered list indent
+                available_width -= NUMBERED2_INDENT / SCALE
+            
+            if needs_tspans:
+                # For inline formatting, we need to wrap while preserving spans
+                # Simple approach: wrap the full text, then re-apply formatting
+                wrapped_lines = wrap_text_to_width(full_text, available_width, p.style.value)
+                
+                for wrapped_idx, wrapped_text in enumerate(wrapped_lines):
+                    line_ypos = ypos + (line_offset * soft_line_height)
+                    
+                    if _logger.root.level == logging.DEBUG:
+                        output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} offset {line_offset} wrapped {wrapped_idx} -->\n')
+                    
+                    # Re-apply formatting to wrapped text
+                    # Find which parts of the original segments map to this wrapped line
+                    output.write(f'\t\t\t<text x="{xx(text_xpos)}" y="{yy(line_ypos)}" class="{style_name}" xml:space="preserve">')
+                    
+                    # Track position in wrapped text to apply formatting
+                    remaining = wrapped_text
+                    pos_in_original = sum(len(wrap_text_to_width(full_text, available_width, p.style.value)[i]) + 1 
+                                         for i in range(wrapped_idx)) if wrapped_idx > 0 else 0
+                    
+                    # Simple approach: render wrapped text with original formatting spans
+                    char_pos = 0
+                    for part in line_parts:
+                        part_text = part['text']
+                        part_start = full_text.find(part_text, char_pos)
+                        part_end = part_start + len(part_text)
+                        
+                        # Find overlap with wrapped line
+                        wrap_start = pos_in_original
+                        wrap_end = pos_in_original + len(wrapped_text)
+                        
+                        overlap_start = max(part_start, wrap_start)
+                        overlap_end = min(part_end, wrap_end)
+                        
+                        if overlap_start < overlap_end:
+                            overlap_text = full_text[overlap_start:overlap_end]
+                            escaped_text = _escape_attrib(overlap_text)
+                            if part['bold'] and part['italic']:
+                                output.write(f'<tspan class="inline-bold inline-italic">{escaped_text}</tspan>')
+                            elif part['bold']:
+                                output.write(f'<tspan class="inline-bold">{escaped_text}</tspan>')
+                            elif part['italic']:
+                                output.write(f'<tspan class="inline-italic">{escaped_text}</tspan>')
+                            else:
+                                output.write(escaped_text)
+                        
+                        char_pos = part_end
+                    
+                    output.write('</text>\n')
+                    line_offset += 1
+                
+                wrapped_line_count += len(wrapped_lines)
+            else:
+                # Simple text - apply word wrapping
+                wrapped_lines = wrap_text_to_width(full_text, available_width, p.style.value)
+                
+                for wrapped_idx, wrapped_text in enumerate(wrapped_lines):
+                    if _logger.root.level == logging.DEBUG:
+                        output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} offset {line_offset} wrapped {wrapped_idx} -->\n')
+                    
+                    line_ypos = ypos + (line_offset * soft_line_height)
+                    output.write(f'\t\t\t<text x="{xx(text_xpos)}" y="{yy(line_ypos)}" class="{style_name}" xml:space="preserve">{_escape_attrib(wrapped_text)}</text>\n')
+                    line_offset += 1
+                
+                wrapped_line_count += len(wrapped_lines)
+        
+        # Use wrapped line count minus 1 for y_offset (first line is already accounted for)
+        # But we also need to account for LINE_SEPARATOR breaks in the original content
+        content = str(p)
+        num_soft_breaks = content.count(LINE_SEPARATOR)
+        # Additional wrapped lines beyond soft breaks
+        extra_wrapped_lines = wrapped_line_count - len(lines)
+        if num_soft_breaks > 0 or extra_wrapped_lines > 0:
+            total_extra = num_soft_breaks + extra_wrapped_lines
+            y_offset += total_extra * soft_line_height
         
         # Add extra space after certain paragraph styles (e.g., headings)
         space_after = SPACE_AFTER.get(p.style.value, 0)
         if space_after > 0:
             y_offset += space_after
+        
+        # Add spacing after checkbox items
+        if is_checkbox or is_checkbox2:
+            y_offset += CHECKBOX_ITEM_SPACING
+        
+        # Add spacing after bullet/numbered list items
+        if is_bullet or is_bullet2 or is_numbered or is_numbered2:
+            y_offset += BULLET_ITEM_SPACING
+        
+        # Update previous style for next iteration
+        prev_style = p.style.value
     
     output.write('\t\t</g>\n')
