@@ -88,7 +88,7 @@ def detect_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
 def set_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
     """
     Detect and set the device profile based on PDF page dimensions.
-    
+
     :param width_pt: PDF page width in points
     :param height_pt: PDF page height in points
     :return: Device name that was set
@@ -97,10 +97,49 @@ def set_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
     set_device(device)
     return device
 
+
+def set_custom_dimensions(width_screen: int, height_screen: int, dpi: int = 226) -> None:
+    """Set custom screen dimensions for non-standard PDF sizes.
+
+    This allows generating SVGs that match arbitrary PDF dimensions rather than
+    being constrained to fixed device profiles (RM2 or RMPP).
+
+    :param width_screen: Screen width in pixels
+    :param height_screen: Screen height in pixels
+    :param dpi: Screen DPI (default 226, same as RM2)
+    """
+    global _current_device, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_DPI
+    global SCALE, PAGE_WIDTH_PT, PAGE_HEIGHT_PT, X_SHIFT
+
+    _current_device = "CUSTOM"
+    SCREEN_WIDTH = width_screen
+    SCREEN_HEIGHT = height_screen
+    SCREEN_DPI = dpi
+    SCALE = 72.0 / SCREEN_DPI
+    PAGE_WIDTH_PT = SCREEN_WIDTH * SCALE
+    PAGE_HEIGHT_PT = SCREEN_HEIGHT * SCALE
+    X_SHIFT = PAGE_WIDTH_PT // 2
+    _logger.debug(f"Set custom dimensions: {SCREEN_WIDTH}x{SCREEN_HEIGHT} @ {SCREEN_DPI} DPI")
+
+
+def set_dimensions_for_pdf(width_pt: float, height_pt: float, dpi: int = 226) -> None:
+    """Set dimensions to match a PDF page size.
+
+    Converts PDF points to screen coordinates and sets custom dimensions.
+    This ensures the generated SVG matches the PDF exactly.
+
+    :param width_pt: PDF page width in points
+    :param height_pt: PDF page height in points
+    :param dpi: DPI to use for conversion (default 226, same as RM2)
+    """
+    scale = 72.0 / dpi
+    width_screen = int(round(width_pt / scale))
+    height_screen = int(round(height_pt / scale))
+    set_custom_dimensions(width_screen, height_screen, dpi)
+
+
 # Initialize with default device (RMPP)
-SCREEN_WIDTH = DEVICE_PROFILES["RMPP"]["width"]
-SCREEN_HEIGHT = DEVICE_PROFILES["RMPP"]["height"]
-SCREEN_DPI = DEVICE_PROFILES["RMPP"]["dpi"]
+set_device('RMPP')
 
 # Margin to add around content bounding box (in screen units)
 BBOX_MARGIN = 0
