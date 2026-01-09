@@ -58,6 +58,9 @@ def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
     if device:
         from .exporters.svg import set_device
         set_device(device)
+    # If no device specified, defaults to RMPP (see device.py)
+    # Arbitary output size can be set with set_dimensions_for_pdf but this isn't
+    # exposed via the CLI yet.
 
     if from_ == "rm":
         with open_output(to, output) as fout:
