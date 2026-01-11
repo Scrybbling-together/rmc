@@ -124,6 +124,7 @@ def chrome_svg_to_pdf(svg_path: str, pdf_path: str, chrome_loc: Optional[str] = 
         subprocess.run([
             chrome,
             "--headless",
+            "--no-sandbox", # without this flag, chrome won't run in docker
             "--disable-gpu",
             "--no-pdf-header-footer",
             f"--print-to-pdf={pdf_path}",
