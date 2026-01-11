@@ -10,7 +10,6 @@ from xml.sax.saxutils import escape as _escape_attrib
 from rmscene import read_tree, SceneTree
 from rmscene import scene_items as si
 from rmscene.text import TextDocument
-from rmscene.crdt_sequence import CrdtId
 
 # Import from device module
 from .device import rmc_config
@@ -22,38 +21,25 @@ from .fonts import (
     FONT_CONFIG,
     FONT_WEIGHT_INLINE_BOLD,
     FONT_FAMILY_SANS,
-    FONT_FAMILY_SERIF,
     get_font_family_sans,
     get_font_family_serif,
     _resolve_font_config,
     wrap_text_to_width,
-    get_text_width_screen,
-    get_char_width_screen,
 )
 
 # Import from layout module
 from .layout import (
-    CHECKBOX_SIZE,
-    BULLET_SIZE,
-    BULLET_INDENT,
-    BULLET2_INDENT,
-    NUMBERED_INDENT,
-    NUMBERED2_INDENT,
-    TEXT_WRAP_MARGIN,
+    build_anchor_pos,
+    get_anchor,
+    get_bounding_box,
+)
+
+# Import from paragraph_styles module
+from .paragraph_styles import (
+    get_style_config,
     BULLET_SECTION_GAP,
-    CHECKBOX_ITEM_SPACING,
-    BULLET_ITEM_SPACING,
-    CHECKBOX_TEXT_GAP,
-    CHECKBOX2_INDENT,
-    BULLET_GAP,
-    NUMBERED2_OFFSET,
-    LINE_HEIGHTS,
-    SOFT_LINE_HEIGHTS,
-    SPACE_AFTER,
+    TEXT_WRAP_MARGIN,
     TEXT_TOP_Y,
-    TEXT_DOCUMENT_TOP_Y_CRDT_ID,
-    TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID,
-    calculate_paragraph_layouts,
 )
 
 # Import writing tools
@@ -84,45 +70,6 @@ def rm_to_svg(rm_path, svg_path):
 def read_template_svg(template_path: Path) -> str:
     lines = template_path.read_text().splitlines()
     return "\n".join(lines[2:-2])
-
-
-def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, float, float]:
-    """
-    Get the bounding box of the text content.
-
-    Uses calculate_paragraph_layouts() to ensure layout calculation matches
-    build_anchor_pos() and draw_text() exactly.
-
-    :return: x_min, x_max, y_min, y_max in screen units
-    """
-    if text is None:
-        return (0, 0, 0, 0)
-
-    # Collect Y positions as paragraphs are laid out
-    y_positions = []
-
-    for layout in calculate_paragraph_layouts(text):
-        # Record Y position after this paragraph's line height is added
-        # (before soft breaks and wrapping)
-        y_base = text.pos_y + layout['y_offset_before'] + layout['line_height']
-        y_positions.append(y_base)
-
-        # If there were soft breaks or extra wrapped lines, record final position too
-        if layout['num_soft_breaks'] > 0 or layout['extra_wrapped_lines'] > 0:
-            y_positions.append(text.pos_y + layout['y_offset_after'])
-
-    if not y_positions:
-        return (0, 0, 0, 0)
-
-    # Text spans from pos_x to pos_x + width
-    x_min = text.pos_x
-    x_max = text.pos_x + text.width
-
-    # Y range from first to last text line (with padding for text height)
-    y_min = y_positions[0] - 50  # approximate text ascent
-    y_max = y_positions[-1] + 20  # approximate text descent
-
-    return (x_min, x_max, y_min, y_max)
 
 
 def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
@@ -175,215 +122,6 @@ def tree_to_svg(tree: SceneTree, output, include_template: Path | None = None):
     output.write('\t</g>\n')
     # END notebook
     output.write('</svg>\n')
-
-
-def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
-    """
-    Find the anchor positions for every text node, including special top and
-    bottom of text anchors.
-
-    Uses calculate_paragraph_layouts() to ensure layout calculation matches
-    get_text_bounding_box() and draw_text() exactly.
-
-    :param text: the root text of the remarkable file
-    :param extended: if True, return all computed values; if False (default), return only anchor_pos for backward compatibility
-    :return: If extended=False: anchor_pos dict
-             If extended=True: (anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset) where:
-        - anchor_pos maps CrdtId -> y position (includes soft line offset)
-        - newline_offsets maps newline CrdtIds -> offset to subtract (line height + prev SPACE_AFTER)
-        - anchor_x_pos maps CrdtId -> x position (for all characters)
-        - anchor_soft_offset maps CrdtId -> soft line offset applied to that character
-    """
-    LINE_SEPARATOR = '\u2028'
-
-    # Initialize tracking structures
-    anchor_pos = {
-        CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID): 100,
-        CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID): 100,
-    }
-    newline_offsets: tp.Dict[CrdtId, int] = {}
-    anchor_x_pos: tp.Dict[CrdtId, float] = {}
-    anchor_soft_offset: tp.Dict[CrdtId, float] = {}
-
-    if text is None:
-        if extended:
-            return anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset
-        else:
-            return anchor_pos
-
-    # Track special anchor positions
-    last_content_y_offset = TEXT_TOP_Y
-    first_line_height = None
-
-    for layout in calculate_paragraph_layouts(text):
-        p = layout['paragraph']
-        i = layout['paragraph_index']
-
-        # Capture first line height for top anchor
-        if first_line_height is None:
-            first_line_height = layout['line_height']
-
-        # Y position for this paragraph (after line_height is added)
-        ypos = text.pos_y + layout['y_offset_before'] + layout['line_height']
-        anchor_pos[p.start_id] = ypos
-
-        # Track newline offsets for paragraph boundaries
-        if i > 0:
-            prev_space_after = SPACE_AFTER.get(layout['prev_style'], 0)
-            newline_offsets[p.start_id] = layout['line_height'] + prev_space_after
-
-        # Track character-level positions (unique to build_anchor_pos)
-        # This is the only part that can't be shared, as it needs per-character iteration
-        current_soft_offset = 0
-        cumulative_x = 0.0
-
-        for subp in p.contents:
-            for j, k in enumerate(subp.i):
-                anchor_pos[k] = ypos + current_soft_offset
-                anchor_x_pos[k] = text.pos_x + cumulative_x
-                anchor_soft_offset[k] = current_soft_offset
-
-                char = subp.s[j] if j < len(subp.s) else ''
-                if char == LINE_SEPARATOR:
-                    current_soft_offset += layout['soft_line_height']
-                    cumulative_x = 0.0  # Reset X for new line
-                else:
-                    cumulative_x += get_char_width_screen(char, p.style.value)
-
-        # Track last content position for bottom anchor
-        visible_content = layout['content'].replace(LINE_SEPARATOR, '').strip()
-        if visible_content:
-            last_content_y_offset = layout['y_offset_after']
-
-    # Update special anchors
-    doc = TextDocument.from_scene_item(text)
-    if doc.contents and first_line_height is not None:
-        first_y_offset = TEXT_TOP_Y + first_line_height
-        anchor_pos[CrdtId(0, TEXT_DOCUMENT_TOP_Y_CRDT_ID)] = text.pos_y + first_y_offset
-        anchor_pos[CrdtId(0, TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID)] = text.pos_y + last_content_y_offset
-
-    if extended:
-        return anchor_pos, newline_offsets, anchor_x_pos, anchor_soft_offset
-    else:
-        # Backward compatibility: return anchor_pos with newline_offsets pre-applied
-        adjusted_anchor_pos = dict(anchor_pos)
-        for crdt_id, offset in newline_offsets.items():
-            if crdt_id in adjusted_anchor_pos:
-                adjusted_anchor_pos[crdt_id] -= offset
-        return adjusted_anchor_pos
-
-
-def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
-    """
-    Get the anchor position for a group.
-    
-    :param item: The group to get anchor for
-    :param anchor_pos: Map of CrdtId -> y position
-    :param newline_offsets: Map of newline CrdtIds -> offset to subtract
-    :param text_pos_x: X position of text block (fallback for TEXT_CHAR anchors)
-    :param anchor_x_pos: Map of CrdtId -> x position for characters
-    :param anchor_soft_offset: Map of CrdtId -> soft line offset for TEXT_CHAR adjustment
-    """
-    if newline_offsets is None:
-        newline_offsets = {}
-    if anchor_x_pos is None:
-        anchor_x_pos = {}
-    if anchor_soft_offset is None:
-        anchor_soft_offset = {}
-        
-    anchor_x = 0.0
-    anchor_y = 0.0
-    if item.anchor_id is not None:
-        assert item.anchor_origin_x is not None
-        anchor_x = item.anchor_origin_x.value
-        
-        # For TEXT_CHAR anchors (anchor_type=1) with anchor_origin_x=0,
-        # use the computed character X position
-        if item.anchor_type is not None and item.anchor_type.value == 1 and anchor_x == 0:
-            if item.anchor_id.value in anchor_x_pos:
-                anchor_x = anchor_x_pos[item.anchor_id.value]
-                _logger.debug("TEXT_CHAR anchor: using char x=%.1f for %s",
-                              anchor_x, item.anchor_id.value)
-            elif text_pos_x is not None:
-                anchor_x = text_pos_x
-                _logger.debug("TEXT_CHAR anchor: fallback to text_pos_x=%.1f", text_pos_x)
-        
-        if item.anchor_id.value in anchor_pos:
-            anchor_y = anchor_pos[item.anchor_id.value]
-            
-            # NOTE: anchor_threshold exists but we don't apply it uniformly.
-            # The threshold value (typically ~35.7) seems to be a baseline offset,
-            # but applying it causes misalignment in various cases.
-            # For now, we don't apply threshold - elements align with their anchor Y directly.
-            # TODO: Determine correct rule for when threshold should be applied.
-            
-            # For TEXT_CHAR anchors, subtract excess soft offset beyond first line
-            # This is because stroke coordinates are relative to the first content line,
-            # not the specific soft line the anchor character is on
-            if item.anchor_type is not None and item.anchor_type.value == 1:
-                soft_off = anchor_soft_offset.get(item.anchor_id.value, 0)
-                # Only subtract offset beyond first line (assume first line is at soft_off = 60)
-                # This brings anchors from line 2+ back to line 1
-                first_line_offset = 60  # SOFT_LINE_HEIGHTS default for first content line
-                if soft_off > first_line_offset:
-                    excess = soft_off - first_line_offset
-                    anchor_y -= excess
-                    _logger.debug("TEXT_CHAR anchor: subtracting excess soft_offset=%.1f for %s",
-                                  excess, item.anchor_id.value)
-            
-            if item.anchor_id.value in newline_offsets:
-                anchor_y -= newline_offsets[item.anchor_id.value]
-                _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %.1f)",
-                              item.anchor_id.value, anchor_y, newline_offsets[item.anchor_id.value])
-            else:
-                _logger.debug("Group anchor: %s -> y=%.1f", item.anchor_id.value, anchor_y)
-        else:
-            _logger.warning("Group anchor: %s is unknown!", item.anchor_id.value)
-
-    return anchor_x, anchor_y
-
-
-def get_bounding_box(item: si.Group,
-                     anchor_pos: tp.Dict[CrdtId, int],
-                     newline_offsets: tp.Dict[CrdtId, int] = None,
-                     text_pos_x: float = None,
-                     anchor_x_pos: tp.Dict[CrdtId, float] = None,
-                     anchor_soft_offset: tp.Dict[CrdtId, float] = None,
-                     default: tp.Tuple[int, int, int, int] = None) \
-        -> tp.Tuple[int, int, int, int]:
-    """Get the bounding box of the given item.
-
-    Default bounds are device dimensions, expanding to include any content beyond.
-    """
-    if newline_offsets is None:
-        newline_offsets = {}
-    if anchor_x_pos is None:
-        anchor_x_pos = {}
-    if anchor_soft_offset is None:
-        anchor_soft_offset = {}
-    # Compute default based on current device settings (can't use in parameter default
-    # because those are evaluated at function definition time, not call time)
-    if default is None:
-        default = (- rmc_config.screen_width // 2, rmc_config.screen_width // 2, 0, rmc_config.screen_height)
-        
-    x_min, x_max, y_min, y_max = default
-
-    for child_id in item.children:
-        child = item.children[child_id]
-        if isinstance(child, si.Group):
-            anchor_x, anchor_y = get_anchor(child, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset)
-            x_min_t, x_max_t, y_min_t, y_max_t = get_bounding_box(child, anchor_pos, newline_offsets, text_pos_x, anchor_x_pos, anchor_soft_offset, (0, 0, 0, 0))
-            x_min = min(x_min, x_min_t + anchor_x)
-            x_max = max(x_max, x_max_t + anchor_x)
-            y_min = min(y_min, y_min_t + anchor_y)
-            y_max = max(y_max, y_max_t + anchor_y)
-        elif isinstance(child, si.Line):
-            x_min = min([x_min] + [p.x for p in child.points])
-            x_max = max([x_max] + [p.x for p in child.points])
-            y_min = min([y_min] + [p.y for p in child.points])
-            y_max = max([y_max] + [p.y for p in child.points])
-
-    return x_min, x_max, y_min, y_max
 
 
 def draw_group(item: si.Group, output, anchor_pos, newline_offsets=None, text_pos_x=None, anchor_x_pos=None, anchor_soft_offset=None):
@@ -568,104 +306,49 @@ def draw_text(text: si.Text, output):
 
     LINE_SEPARATOR = '\u2028'
     y_offset = TEXT_TOP_Y
-    
-    # Track previous style for section gaps and numbered list counters
+
+    # Track previous style for section gaps
     prev_style = None
-    numbered_counter = 0
-    numbered2_counter = 0
-    
-    # Define which styles are "list" styles (bullet, numbered)
-    LIST_STYLES = {
-        si.ParagraphStyle.BULLET,
-        si.ParagraphStyle.BULLET2,
-        si.ParagraphStyle.CHECKBOX,
-        si.ParagraphStyle.CHECKBOX_CHECKED,
-        si.ParagraphStyle.CHECKBOX2,
-        si.ParagraphStyle.CHECKBOX2_CHECKED,
-        si.ParagraphStyle.NUMBERED,
-        si.ParagraphStyle.NUMBERED2,
-    }
+    prev_style_config = None
+
+    # Counter management - keyed by counter_key
+    counters: tp.Dict[str, int] = {}
 
     doc = TextDocument.from_scene_item(text)
     for p_idx, p in enumerate(doc.contents):
-        line_height = LINE_HEIGHTS.get(p.style.value, 70)
-        soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
-        
+        # Get style configuration
+        style_config = get_style_config(p.style.value)
+        line_height = style_config.line_height
+        soft_line_height = style_config.soft_line_height
+
         # Add section gap when transitioning from non-list to list style
-        is_list_style = p.style.value in LIST_STYLES
-        prev_was_list_style = prev_style in LIST_STYLES if prev_style else False
+        is_list_style = style_config.is_list_style
+        prev_was_list_style = prev_style_config.is_list_style if prev_style_config else False
         if is_list_style and not prev_was_list_style and prev_style is not None:
             y_offset += BULLET_SECTION_GAP
-        
-        # Manage numbered list counters
-        if p.style.value == si.ParagraphStyle.NUMBERED:
-            # Reset counter if previous wasn't NUMBERED
-            if prev_style != si.ParagraphStyle.NUMBERED:
-                numbered_counter = 0
-            numbered_counter += 1
-        elif p.style.value == si.ParagraphStyle.NUMBERED2:
-            # Reset counter if previous wasn't NUMBERED2
-            if prev_style != si.ParagraphStyle.NUMBERED2:
-                numbered2_counter = 0
-            numbered2_counter += 1
-        
+
+        # Counter management - generalized via style_config
+        counter_value = None
+        if style_config.needs_counter:
+            key = style_config.counter_key
+            # Reset counter if previous style used a different counter
+            prev_key = prev_style_config.counter_key if prev_style_config else None
+            if prev_key != key:
+                counters[key] = 0
+            counters[key] = counters.get(key, 0) + 1
+            counter_value = counters[key]
+
         y_offset += line_height
 
         xpos = text.pos_x
         ypos = text.pos_y + y_offset
         style_name = p.style.value.name.lower()
-        
-        # Draw checkbox symbol for checkbox styles
-        is_checkbox = p.style.value in (si.ParagraphStyle.CHECKBOX, si.ParagraphStyle.CHECKBOX_CHECKED)
-        is_checkbox2 = p.style.value in (si.ParagraphStyle.CHECKBOX2, si.ParagraphStyle.CHECKBOX2_CHECKED)
-        is_checked = p.style.value in (si.ParagraphStyle.CHECKBOX_CHECKED, si.ParagraphStyle.CHECKBOX2_CHECKED)
-        
-        # Check for bullet styles
-        is_bullet = p.style.value == si.ParagraphStyle.BULLET
-        is_bullet2 = p.style.value == si.ParagraphStyle.BULLET2
-        
-        # Check for numbered list styles
-        is_numbered = p.style.value == si.ParagraphStyle.NUMBERED
-        is_numbered2 = p.style.value == si.ParagraphStyle.NUMBERED2
-        
-        # Adjust text position for checkbox items
-        text_xpos = xpos
-        if is_checkbox or is_checkbox2:
-            checkbox_id = "checkbox-checked" if is_checked else "checkbox-unchecked"
-            # Position checkbox - indent for CHECKBOX2
-            checkbox_offset = CHECKBOX2_INDENT if is_checkbox2 else 0
-            checkbox_x = rmc_config.xx(xpos) + checkbox_offset
-            checkbox_y = rmc_config.yy(ypos) - CHECKBOX_SIZE + 2  # Align with text baseline
-            output.write(f'\t\t\t<use href="#{checkbox_id}" x="{checkbox_x}" y="{checkbox_y}" '
-                        f'width="{CHECKBOX_SIZE}" height="{CHECKBOX_SIZE}"/>\n')
-            # Push text to the right of checkbox
-            text_xpos = xpos + (checkbox_offset + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / rmc_config.scale
-        elif is_bullet or is_bullet2:
-            # Determine indentation and bullet style
-            indent = BULLET_INDENT if is_bullet else BULLET2_INDENT
-            bullet_id = "bullet" if is_bullet else "bullet2"
-            
-            # Position bullet before text
-            bullet_x = rmc_config.xx(xpos) + indent - BULLET_SIZE - BULLET_GAP
-            bullet_y = rmc_config.yy(ypos) - BULLET_SIZE / 2 - 1  # Center vertically with text
-            output.write(f'\t\t\t<use href="#{bullet_id}" x="{bullet_x}" y="{bullet_y}" '
-                        f'width="{BULLET_SIZE}" height="{BULLET_SIZE}"/>\n')
-            # Indent text
-            text_xpos = xpos + indent / rmc_config.scale
-        elif is_numbered or is_numbered2:
-            # Determine indentation and counter
-            indent = NUMBERED_INDENT if is_numbered else NUMBERED2_INDENT
-            counter = numbered_counter if is_numbered else numbered2_counter
-            number_text = f"{counter}."
-            
-            # Render the number as text
-            # For NUMBERED2, offset the number position to show nesting
-            number_offset = 0 if is_numbered else NUMBERED2_OFFSET
-            number_x = rmc_config.xx(xpos) + number_offset
-            number_y = rmc_config.yy(ypos)
-            output.write(f'\t\t\t<text x="{number_x}" y="{number_y}" class="{style_name}" xml:space="preserve">{number_text}</text>\n')
-            # Indent text after number
-            text_xpos = xpos + indent / rmc_config.scale
+
+        # Draw marker using style_config (checkbox/bullet/number)
+        style_config.draw_marker(xpos, ypos, output, rmc_config, counter=counter_value)
+
+        # Calculate text X offset using style_config
+        text_xpos = xpos + style_config.text_x_offset(rmc_config.scale)
         
         # Render text with inline formatting support
         # First, collect all text segments with their formatting
@@ -728,24 +411,7 @@ def draw_text(text: si.Text, output):
             
             # Apply word wrapping based on available width
             available_width = text.width - TEXT_WRAP_MARGIN
-            if is_checkbox:
-                # Reduce available width by checkbox space
-                available_width -= (CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / rmc_config.scale
-            elif is_checkbox2:
-                # Reduce available width by indented checkbox space
-                available_width -= (CHECKBOX2_INDENT + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / rmc_config.scale
-            elif is_bullet:
-                # Reduce available width by bullet indent
-                available_width -= BULLET_INDENT / rmc_config.scale
-            elif is_bullet2:
-                # Reduce available width by nested bullet indent
-                available_width -= BULLET2_INDENT / rmc_config.scale
-            elif is_numbered:
-                # Reduce available width by numbered list indent
-                available_width -= NUMBERED_INDENT / rmc_config.scale
-            elif is_numbered2:
-                # Reduce available width by nested numbered list indent
-                available_width -= NUMBERED2_INDENT / rmc_config.scale
+            available_width -= style_config.width_reduction(rmc_config.scale)
             
             if needs_tspans:
                 # For inline formatting, we need to wrap while preserving spans
@@ -822,21 +488,19 @@ def draw_text(text: si.Text, output):
         if num_soft_breaks > 0 or extra_wrapped_lines > 0:
             total_extra = num_soft_breaks + extra_wrapped_lines
             y_offset += total_extra * soft_line_height
-        
+
         # Add extra space after certain paragraph styles (e.g., headings)
-        space_after = SPACE_AFTER.get(p.style.value, 0)
+        space_after = style_config.space_after
         if space_after > 0:
             y_offset += space_after
-        
-        # Add spacing after checkbox items
-        if is_checkbox or is_checkbox2:
-            y_offset += CHECKBOX_ITEM_SPACING
-        
-        # Add spacing after bullet/numbered list items
-        if is_bullet or is_bullet2 or is_numbered or is_numbered2:
-            y_offset += BULLET_ITEM_SPACING
-        
+
+        # Add list item spacing
+        item_spacing = style_config.item_spacing
+        if item_spacing > 0:
+            y_offset += item_spacing
+
         # Update previous style for next iteration
         prev_style = p.style.value
-    
+        prev_style_config = style_config
+
     output.write('\t\t</g>\n')

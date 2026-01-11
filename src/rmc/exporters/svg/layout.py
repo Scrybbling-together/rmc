@@ -10,76 +10,15 @@ from rmscene.text import TextDocument
 # Import from sibling modules
 from . import device
 from . import fonts
+from .paragraph_styles import (
+    ParagraphStyleConfig,
+    get_style_config,
+    BULLET_SECTION_GAP,
+    TEXT_WRAP_MARGIN,
+    TEXT_TOP_Y,
+)
 
 _logger = logging.getLogger(__name__)
-
-# =============================================================================
-# LAYOUT CONSTANTS
-# =============================================================================
-
-# Checkbox positioning constants (used in both build_anchor_pos and draw_text)
-CHECKBOX_SIZE = 12  # Size in points
-CHECKBOX_TEXT_GAP = 4  # Gap between checkbox and text in points
-CHECKBOX_ITEM_SPACING = 30  # Extra spacing between checkbox items in screen units
-CHECKBOX2_INDENT = 12  # Indentation for nested checkbox in points
-
-# Bullet list positioning constants
-BULLET_SIZE = 4  # Bullet circle diameter in points
-BULLET_INDENT = 12  # Indentation for bullet text in points
-BULLET2_INDENT = 24  # Indentation for nested bullet text in points
-BULLET_GAP = 6  # Gap between bullet and text in points
-BULLET_ITEM_SPACING = 20  # Extra spacing between bullet items in screen units
-BULLET_SECTION_GAP = 30  # Gap before bullet section starts (from non-bullet paragraph)
-
-# Numbered list constants
-NUMBERED_INDENT = 12  # Indentation for numbered list text in points (matching BULLET_INDENT)
-NUMBERED2_INDENT = 24  # Indentation for nested numbered list text in points (matching BULLET2_INDENT)
-NUMBERED_GAP = 4  # Gap between number and text in points
-NUMBERED2_OFFSET = 12  # Offset for nested numbered list number position
-
-# Text wrap margin - the device appears to use less than the full text.width
-# for line wrapping. This margin is subtracted from text.width.
-TEXT_WRAP_MARGIN = 236  # Approximate margin in screen units
-
-TEXT_TOP_Y = -88
-base = 69.5
-LINE_HEIGHTS = {
-    si.ParagraphStyle.PLAIN: base,
-    si.ParagraphStyle.BULLET: base/2,
-    si.ParagraphStyle.BULLET2: base/2,
-    si.ParagraphStyle.BOLD: base,
-    si.ParagraphStyle.HEADING: base*2,
-    si.ParagraphStyle.CHECKBOX: base/2,
-    si.ParagraphStyle.CHECKBOX_CHECKED: base/2,
-    si.ParagraphStyle.CHECKBOX2: base/2,
-    si.ParagraphStyle.CHECKBOX2_CHECKED: base/2,
-    si.ParagraphStyle.NUMBERED: base/2,
-    si.ParagraphStyle.NUMBERED2: base/2,
-}
-
-# Extra space to add AFTER certain paragraph styles
-# This creates visual separation between headings and body text
-SPACE_AFTER = {
-    si.ParagraphStyle.HEADING: base * 0.3,  # Add extra space after headings
-}
-
-# Soft line heights for LINE_SEPARATOR (U+2028) breaks within paragraphs
-# These are tighter than paragraph breaks
-soft_base = 60
-small_soft_base = 40
-SOFT_LINE_HEIGHTS = {
-    si.ParagraphStyle.PLAIN: soft_base,
-    si.ParagraphStyle.BULLET: small_soft_base,
-    si.ParagraphStyle.BULLET2: small_soft_base,
-    si.ParagraphStyle.BOLD: small_soft_base,
-    si.ParagraphStyle.HEADING: soft_base,
-    si.ParagraphStyle.CHECKBOX: small_soft_base,
-    si.ParagraphStyle.CHECKBOX_CHECKED: small_soft_base,
-    si.ParagraphStyle.CHECKBOX2: small_soft_base,
-    si.ParagraphStyle.CHECKBOX2_CHECKED: small_soft_base,
-    si.ParagraphStyle.NUMBERED: small_soft_base,
-    si.ParagraphStyle.NUMBERED2: small_soft_base,
-}
 
 # Special anchor IDs for text document boundaries
 TEXT_DOCUMENT_TOP_Y_CRDT_ID = 0xfffffffffffe
@@ -100,15 +39,10 @@ class ParagraphLayoutInfo(tp.TypedDict):
     line_height: float
     soft_line_height: float
 
-    # Style classification (determines indentation and spacing)
+    # Style configuration (encapsulates all style-specific behavior)
+    style_config: ParagraphStyleConfig
     is_list_style: bool
-    prev_para_is_list_style: bool # is previous paragraph a list?
-    is_checkbox: bool
-    is_checkbox2: bool
-    is_bullet: bool
-    is_bullet2: bool
-    is_numbered: bool
-    is_numbered2: bool
+    prev_para_is_list_style: bool  # is previous paragraph a list?
 
     # Word wrapping calculations
     available_width: float
@@ -119,8 +53,8 @@ class ParagraphLayoutInfo(tp.TypedDict):
     extra_wrapped_lines: int  # Beyond segments count
 
     # Spacing (applied to y_offset_after)
-    space_after: float  # SPACE_AFTER[style] (e.g., after headings)
-    item_spacing: float  # CHECKBOX_ITEM_SPACING or BULLET_ITEM_SPACING
+    space_after: float  # style_config.space_after (e.g., after headings)
+    item_spacing: float  # style_config.item_spacing
 
 
 def calculate_paragraph_layouts(
@@ -135,7 +69,7 @@ def calculate_paragraph_layouts(
     3. Count soft line breaks (LINE_SEPARATOR \\u2028) and add their height
     4. Calculate available width after accounting for list indentation (checkbox/bullet/numbered)
     5. Perform word wrapping to determine extra wrapped lines
-    6. Add extra spacing (SPACE_AFTER for headings, item spacing for lists)
+    6. Add extra spacing (space_after for headings, item_spacing for lists)
 
     Each paragraph's y_offset_after includes ALL spacing (soft breaks, wrapped lines,
     space_after, item_spacing), ready for the next paragraph or for positioning.
@@ -152,32 +86,22 @@ def calculate_paragraph_layouts(
     if not doc.contents:
         return
 
-    # Define which styles are "list" styles (must match draw_text)
-    LIST_STYLES = {
-        si.ParagraphStyle.BULLET,
-        si.ParagraphStyle.BULLET2,
-        si.ParagraphStyle.CHECKBOX,
-        si.ParagraphStyle.CHECKBOX_CHECKED,
-        si.ParagraphStyle.CHECKBOX2,
-        si.ParagraphStyle.CHECKBOX2_CHECKED,
-        si.ParagraphStyle.NUMBERED,
-        si.ParagraphStyle.NUMBERED2,
-    }
-
     y_offset = TEXT_TOP_Y
     prev_style = None
+    prev_style_config: tp.Optional[ParagraphStyleConfig] = None
 
     for i, p in enumerate(doc.contents):
         # Capture state before processing this paragraph
         y_offset_before = y_offset
 
-        # Get paragraph-specific heights
-        line_height = LINE_HEIGHTS.get(p.style.value, 70)
-        soft_line_height = SOFT_LINE_HEIGHTS.get(p.style.value, 50)
+        # Get style configuration - replaces LINE_HEIGHTS/SOFT_LINE_HEIGHTS lookups
+        style_config = get_style_config(p.style.value)
+        line_height = style_config.line_height
+        soft_line_height = style_config.soft_line_height
 
-        # Add section gap when transitioning from non-list to list style (must match draw_text)
-        is_list_style = p.style.value in LIST_STYLES
-        prev_was_list_style = prev_style in LIST_STYLES if prev_style else False
+        # Add section gap when transitioning from non-list to list style
+        is_list_style = style_config.is_list_style
+        prev_was_list_style = prev_style_config.is_list_style if prev_style_config else False
         if is_list_style and not prev_was_list_style and prev_style is not None:
             y_offset += BULLET_SECTION_GAP
 
@@ -192,32 +116,11 @@ def calculate_paragraph_layouts(
         if num_soft_breaks > 0:
             y_offset += num_soft_breaks * soft_line_height
 
-        # Calculate available width after accounting for list indentation
+        # Calculate available width - use style_config.width_reduction()
         available_width = text.width - TEXT_WRAP_MARGIN
+        available_width -= style_config.width_reduction(device.rmc_config.scale)
 
-        # Classify paragraph style (determines indentation)
-        is_checkbox = p.style.value in (si.ParagraphStyle.CHECKBOX, si.ParagraphStyle.CHECKBOX_CHECKED)
-        is_checkbox2 = p.style.value in (si.ParagraphStyle.CHECKBOX2, si.ParagraphStyle.CHECKBOX2_CHECKED)
-        is_bullet = p.style.value == si.ParagraphStyle.BULLET
-        is_bullet2 = p.style.value == si.ParagraphStyle.BULLET2
-        is_numbered = p.style.value == si.ParagraphStyle.NUMBERED
-        is_numbered2 = p.style.value == si.ParagraphStyle.NUMBERED2
-
-        # Reduce available width by indentation (must match draw_text)
-        if is_checkbox:
-            available_width -= (CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / device.rmc_config.scale
-        elif is_checkbox2:
-            available_width -= (CHECKBOX2_INDENT + CHECKBOX_SIZE + CHECKBOX_TEXT_GAP) / device.rmc_config.scale
-        elif is_bullet:
-            available_width -= BULLET_INDENT / device.rmc_config.scale
-        elif is_bullet2:
-            available_width -= BULLET2_INDENT / device.rmc_config.scale
-        elif is_numbered:
-            available_width -= NUMBERED_INDENT / device.rmc_config.scale
-        elif is_numbered2:
-            available_width -= NUMBERED2_INDENT / device.rmc_config.scale
-
-        # Calculate word wrapping (must match draw_text)
+        # Calculate word wrapping
         # Split by LINE_SEPARATOR first, then wrap each segment
         segments = content.split(LINE_SEPARATOR)
         total_wrapped_lines = 0
@@ -234,18 +137,14 @@ def calculate_paragraph_layouts(
             y_offset += extra_wrapped_lines * soft_line_height
 
         # Add extra space after certain paragraph styles (e.g., headings)
-        space_after = SPACE_AFTER.get(p.style.value, 0)
+        space_after = style_config.space_after
         if space_after > 0:
             y_offset += space_after
 
-        # Add list item spacing (must match draw_text)
-        item_spacing = 0
-        if is_checkbox or is_checkbox2:
-            item_spacing = CHECKBOX_ITEM_SPACING
-            y_offset += CHECKBOX_ITEM_SPACING
-        elif is_bullet or is_bullet2 or is_numbered or is_numbered2:
-            item_spacing = BULLET_ITEM_SPACING
-            y_offset += BULLET_ITEM_SPACING
+        # Add list item spacing
+        item_spacing = style_config.item_spacing
+        if item_spacing > 0:
+            y_offset += item_spacing
 
         # Yield complete layout information for this paragraph
         yield {
@@ -258,12 +157,7 @@ def calculate_paragraph_layouts(
             'soft_line_height': soft_line_height,
             'is_list_style': is_list_style,
             'prev_para_is_list_style': prev_was_list_style,
-            'is_checkbox': is_checkbox,
-            'is_checkbox2': is_checkbox2,
-            'is_bullet': is_bullet,
-            'is_bullet2': is_bullet2,
-            'is_numbered': is_numbered,
-            'is_numbered2': is_numbered2,
+            'style_config': style_config,
             'available_width': available_width,
             'content': content,
             'num_soft_breaks': num_soft_breaks,
@@ -275,6 +169,7 @@ def calculate_paragraph_layouts(
         }
 
         prev_style = p.style.value
+        prev_style_config = style_config
 
 
 def get_text_bounding_box(text: tp.Optional[si.Text]) -> tp.Tuple[float, float, float, float]:
@@ -367,8 +262,9 @@ def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
         anchor_pos[p.start_id] = ypos
 
         # Track newline offsets for paragraph boundaries
-        if i > 0:
-            prev_space_after = SPACE_AFTER.get(layout['prev_style'], 0)
+        if i > 0 and layout['prev_style'] is not None:
+            prev_style_config = get_style_config(layout['prev_style'])
+            prev_space_after = prev_style_config.space_after
             newline_offsets[p.start_id] = layout['line_height'] + prev_space_after
 
         # Track character-level positions (unique to build_anchor_pos)
