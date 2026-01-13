@@ -386,6 +386,7 @@ class Numbered2StyleConfig(ParagraphStyleConfig):
 
 # Singleton instances for styles
 _STYLE_INSTANCES: tp.Dict[si.ParagraphStyle, ParagraphStyleConfig] = {
+    si.ParagraphStyle.BASIC: PlainStyleConfig(),
     si.ParagraphStyle.PLAIN: PlainStyleConfig(),
     si.ParagraphStyle.BOLD: BoldStyleConfig(),
     si.ParagraphStyle.HEADING: HeadingStyleConfig(),
