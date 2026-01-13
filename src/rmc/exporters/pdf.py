@@ -5,6 +5,7 @@ https://github.com/chemag/maxio .
 """
 
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -132,6 +133,41 @@ def chrome_svg_to_pdf(svg_path: str, pdf_path: str, chrome_loc: Optional[str] = 
         ], check=True)
 
 
+def _svg_to_pdf(svg_data: str, pdf_file: Path, use_chrome: bool = True, chrome_loc: Optional[str] = None):
+    """
+    Convert SVG data to PDF.
+
+    :param svg_data: SVG data as string
+    :param pdf_file: Path to output pdf
+    :param use_chrome: If True, use Chrome when fonts are present; if False, always use Cairo
+    :param chrome_loc: Optional explicit path to Chrome binary
+    """
+    # Only use Chrome if requested and SVG contains fonts
+    has_fonts = 'font-family' in svg_data or '@font-face' in svg_data
+
+    if use_chrome and has_fonts:
+        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as temp_svg:
+            temp_svg.write(svg_data)
+            temp_svg.flush()
+            temp_svg_path = temp_svg.name
+        try:
+            chrome_svg_to_pdf(temp_svg_path, str(pdf_file), chrome_loc)
+        finally:
+            Path(temp_svg_path).unlink(missing_ok=True)
+    else:
+        # Use Cairo - extract dimensions from SVG to ensure correct output size
+        width_match = re.search(r'width="([0-9.]+)"', svg_data)
+        height_match = re.search(r'height="([0-9.]+)"', svg_data)
+        kwargs = {}
+        if width_match and height_match:
+            kwargs['output_width'] = float(width_match.group(1))
+            kwargs['output_height'] = float(height_match.group(1))
+        svg2pdf(
+            bytestring=svg_data.encode('utf-8'),
+            write_to=str(pdf_file),
+            **kwargs
+        )
+
 def svg_to_pdf(svg_file, pdf_file, use_chrome: bool = True, chrome_loc: Optional[str] = None):
     """
     Convert SVG to PDF.
@@ -141,24 +177,8 @@ def svg_to_pdf(svg_file, pdf_file, use_chrome: bool = True, chrome_loc: Optional
     :param use_chrome: If True, use Chrome; if False, use Cairo
     :param chrome_loc: Optional explicit path to Chrome binary
     """
-    if use_chrome:
-        svg_str = svg_file.getvalue()
-        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as temp_svg:
-            temp_svg.write(svg_str)
-            temp_svg.flush()
-            temp_svg_path = temp_svg.name
-        try:
-            chrome_svg_to_pdf(temp_svg_path, pdf_file.name, chrome_loc)
-        finally:
-            Path(temp_svg_path).unlink(missing_ok=True)
-    else:
-        # Use Cairo
-        svg2pdf(
-            bytestring=svg_file.getvalue().encode('utf-8'),
-            write_to=pdf_file.name,
-            dpi=72
-        )
-
+    svg_str = svg_file.getvalue()
+    _svg_to_pdf(svg_str, pdf_file.name, use_chrome, chrome_loc)
 
 def rm_to_pdf(rm_path, pdf_path, use_chrome: bool = True, chrome_loc: Optional[str] = None):
     """
