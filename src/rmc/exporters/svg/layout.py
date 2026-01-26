@@ -285,10 +285,7 @@ def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
                 else:
                     cumulative_x += fonts.get_char_width_screen(char, p.style.value)
 
-        # Track last content position for bottom anchor
-        visible_content = layout['content'].replace(LINE_SEPARATOR, '').strip()
-        if visible_content:
-            last_content_y_offset = layout['y_offset_after']
+        last_content_y_offset = layout['y_offset_after']
 
     # Update special anchors
     doc = TextDocument.from_scene_item(text)
