@@ -91,9 +91,6 @@ def calculate_paragraph_layouts(
     prev_style_config: tp.Optional[ParagraphStyleConfig] = None
 
     for i, p in enumerate(doc.contents):
-        # Capture state before processing this paragraph
-        y_offset_before = y_offset
-
         # Get style configuration - replaces LINE_HEIGHTS/SOFT_LINE_HEIGHTS lookups
         style_config = get_style_config(p.style.value)
         line_height = style_config.line_height
@@ -104,6 +101,10 @@ def calculate_paragraph_layouts(
         prev_was_list_style = prev_style_config.is_list_style if prev_style_config else False
         if is_list_style and not prev_was_list_style and prev_style is not None:
             y_offset += BULLET_SECTION_GAP
+
+        # Capture state AFTER bullet section gap but BEFORE line_height
+        # This matches how draw_text calculates ypos = text.pos_y + y_offset (after gap, after line_height)
+        y_offset_before = y_offset
 
         # Advance by paragraph line height
         y_offset += line_height
@@ -265,25 +266,84 @@ def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
         if i > 0 and layout['prev_style'] is not None:
             prev_style_config = get_style_config(layout['prev_style'])
             prev_space_after = prev_style_config.space_after
-            newline_offsets[p.start_id] = layout['line_height'] + prev_space_after
+            offset = layout['line_height'] + prev_space_after
+            # When transitioning from non-list to list, BULLET_SECTION_GAP was added to y_offset.
+            # Include it in newline_offset so strokes anchored to paragraph start align correctly.
+            if layout['is_list_style'] and not layout['prev_para_is_list_style']:
+                offset += BULLET_SECTION_GAP
+            newline_offsets[p.start_id] = offset
 
         # Track character-level positions (unique to build_anchor_pos)
         # This is the only part that can't be shared, as it needs per-character iteration
         current_soft_offset = 0
         cumulative_x = 0.0
+        available_width = layout['available_width']
+        soft_line_height = layout['soft_line_height']
+        
+        # Track word boundaries for proper wrapping
+        current_word_start_x = 0.0
+        current_word_chars = []  # List of (id, char) tuples in current word
 
         for subp in p.contents:
             for j, k in enumerate(subp.i):
-                anchor_pos[k] = ypos + current_soft_offset
-                anchor_x_pos[k] = text.pos_x + cumulative_x
-                anchor_soft_offset[k] = current_soft_offset
-
                 char = subp.s[j] if j < len(subp.s) else ''
+                
                 if char == LINE_SEPARATOR:
-                    current_soft_offset += layout['soft_line_height']
-                    cumulative_x = 0.0  # Reset X for new line
-                else:
+                    # Explicit soft line break
+                    # First, finalize positions for any pending word
+                    for word_k, word_char in current_word_chars:
+                        anchor_pos[word_k] = ypos + current_soft_offset
+                    current_word_chars = []
+                    
+                    anchor_pos[k] = ypos + current_soft_offset
+                    anchor_x_pos[k] = text.pos_x + cumulative_x
+                    anchor_soft_offset[k] = current_soft_offset
+                    
+                    current_soft_offset += soft_line_height
+                    cumulative_x = 0.0
+                    current_word_start_x = 0.0
+                elif char == ' ':
+                    # Space - finalize current word and check if next word needs to wrap
+                    for word_k, word_char in current_word_chars:
+                        anchor_pos[word_k] = ypos + current_soft_offset
+                    current_word_chars = []
+                    
+                    anchor_pos[k] = ypos + current_soft_offset
+                    anchor_x_pos[k] = text.pos_x + cumulative_x
+                    anchor_soft_offset[k] = current_soft_offset
+                    
                     cumulative_x += fonts.get_char_width_screen(char, p.style.value)
+                    current_word_start_x = cumulative_x
+                else:
+                    # Regular character - add to current word
+                    char_width = fonts.get_char_width_screen(char, p.style.value)
+                    
+                    # Check if adding this character would exceed the line width
+                    # If so, wrap the entire current word to the next line
+                    if cumulative_x + char_width > available_width and current_word_start_x > 0:
+                        # Wrap: move to next line
+                        current_soft_offset += soft_line_height
+                        
+                        # Recalculate X positions for current word on new line
+                        new_x = 0.0
+                        for word_k, word_char in current_word_chars:
+                            anchor_x_pos[word_k] = text.pos_x + new_x
+                            anchor_pos[word_k] = ypos + current_soft_offset
+                            anchor_soft_offset[word_k] = current_soft_offset
+                            new_x += fonts.get_char_width_screen(word_char, p.style.value)
+                        
+                        cumulative_x = new_x
+                        current_word_start_x = 0.0
+                    
+                    # Add this character
+                    anchor_x_pos[k] = text.pos_x + cumulative_x
+                    anchor_soft_offset[k] = current_soft_offset
+                    current_word_chars.append((k, char))
+                    cumulative_x += char_width
+        
+        # Finalize any remaining word
+        for word_k, word_char in current_word_chars:
+            anchor_pos[word_k] = ypos + current_soft_offset
 
         last_content_y_offset = layout['y_offset_after']
 
@@ -343,12 +403,6 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
         if item.anchor_id.value in anchor_pos:
             anchor_y = anchor_pos[item.anchor_id.value]
 
-            # NOTE: anchor_threshold exists but we don't apply it uniformly.
-            # The threshold value (typically ~35.7) seems to be a baseline offset,
-            # but applying it causes misalignment in various cases.
-            # For now, we don't apply threshold - elements align with their anchor Y directly.
-            # TODO: Determine correct rule for when threshold should be applied.
-
             # For TEXT_CHAR anchors, subtract excess soft offset beyond first line
             # This is because stroke coordinates are relative to the first content line,
             # not the specific soft line the anchor character is on
@@ -363,10 +417,31 @@ def get_anchor(item: si.Group, anchor_pos, newline_offsets=None, text_pos_x=None
                     _logger.debug("TEXT_CHAR anchor: subtracting excess soft_offset=%.1f for %s",
                                   excess, item.anchor_id.value)
 
+            # Apply newline_offset for paragraph boundary anchors
             if item.anchor_id.value in newline_offsets:
-                anchor_y -= newline_offsets[item.anchor_id.value]
-                _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %.1f)",
-                              item.anchor_id.value, anchor_y, newline_offsets[item.anchor_id.value])
+                # For type 1 (TEXT_CHAR) anchors at paragraph starts, check if the paragraph has content
+                # Empty paragraphs should NOT have newline_offset applied for type 1 anchors
+                # because the stroke is likely meant to align with content below, not above
+                should_apply_newline_offset = True
+                
+                if item.anchor_type is not None and item.anchor_type.value == 1:
+                    # Check if this paragraph has content by looking for character positions
+                    # near the anchor ID in anchor_x_pos
+                    anchor_part1 = item.anchor_id.value.part1
+                    anchor_part2 = item.anchor_id.value.part2
+                    has_content = any(
+                        CrdtId(anchor_part1, anchor_part2 + offset) in anchor_x_pos
+                        for offset in range(1, 15)
+                    )
+                    if not has_content:
+                        should_apply_newline_offset = False
+                        _logger.debug("TEXT_CHAR anchor at empty para: %s -> y=%.1f (no newline shift)",
+                                      item.anchor_id.value, anchor_y)
+                
+                if should_apply_newline_offset:
+                    anchor_y -= newline_offsets[item.anchor_id.value]
+                    _logger.debug("Group anchor: %s -> y=%.1f (newline, shifted up by %.1f)",
+                                  item.anchor_id.value, anchor_y, newline_offsets[item.anchor_id.value])
             else:
                 _logger.debug("Group anchor: %s -> y=%.1f", item.anchor_id.value, anchor_y)
         else:

@@ -33,7 +33,7 @@ BULLET_SIZE = 4  # Bullet circle diameter in points
 BULLET_INDENT = 12  # Indentation for bullet text in points
 BULLET2_INDENT = 24  # Indentation for nested bullet text in points
 BULLET_GAP = 6  # Gap between bullet and text in points
-BULLET_ITEM_SPACING = 20  # Extra spacing between bullet items in screen units
+BULLET_ITEM_SPACING = 30  # Extra spacing between bullet items in screen units
 BULLET_SECTION_GAP = 30  # Gap before bullet section starts (from non-bullet paragraph)
 
 # Numbered list constants
