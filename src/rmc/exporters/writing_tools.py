@@ -157,7 +157,7 @@ class Marker(Pen):
 
     def get_segment_width(self, speed, direction, width, pressure, last_width):
         segment_width = 0.9 * (
-            (width / 4) - 0.4 * self.direction_to_tilt(direction)
+            (width / 5) - 0.4 * self.direction_to_tilt(direction)
         ) + (0.1 * last_width)
         return segment_width
 
