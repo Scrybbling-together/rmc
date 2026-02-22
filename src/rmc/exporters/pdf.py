@@ -186,7 +186,7 @@ def rm_to_pdf(rm_path, pdf_path, use_chrome: bool = True, chrome_loc: Optional[s
 
     :param rm_path: Path to .rm file
     :param pdf_path: Path to output PDF file
-    :param use_chrome: If True, use Chrome; if False, use Cairo
+    :param use_chrome: If True, use Chrome when fonts are present; if False, always use Cairo
     :param chrome_loc: Optional explicit path to Chrome binary
     """
     with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as f_temp:
@@ -194,10 +194,7 @@ def rm_to_pdf(rm_path, pdf_path, use_chrome: bool = True, chrome_loc: Optional[s
         temp_svg_path = f_temp.name
 
     try:
-        if use_chrome:
-            chrome_svg_to_pdf(temp_svg_path, pdf_path, chrome_loc)
-        else:
-            # Use Cairo
-            svg2pdf(url=temp_svg_path, write_to=pdf_path, dpi=72)
+        svg_data = Path(temp_svg_path).read_text()
+        _svg_to_pdf(svg_data, pdf_path, use_chrome=use_chrome, chrome_loc=chrome_loc)
     finally:
         Path(temp_svg_path).unlink(missing_ok=True)
