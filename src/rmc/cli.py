@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import click
 from rmscene import read_tree, read_blocks, write_blocks, simple_text_document
-from .exporters.svg import tree_to_svg, DEVICE_PROFILES
+from .exporters.svg import tree_to_svg
 from .exporters.pdf import svg_to_pdf
 from .exporters.markdown import print_text
 
@@ -22,9 +22,8 @@ import logging
 @click.option("-o", "--output", type=click.Path(), help="Output filename (default: write to standard out)")
 @click.option("--no-chrome", is_flag=True, help="Use Cairo instead of Chrome for PDF conversion")
 @click.option("--chrome-loc", type=click.Path(), help="Path to Chrome/Chromium binary")
-@click.option("--device", type=click.Choice(list(DEVICE_PROFILES.keys())), help="Device type (overrides auto-detection)")
 @click.argument("input", nargs=-1, type=click.Path(exists=True))
-def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
+def cli(verbose, from_, to, output, input, no_chrome, chrome_loc):
     """Convert to/from reMarkable v6 files.
 
     Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
@@ -54,14 +53,6 @@ def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
         if output is None:
             raise click.UsageError("Must specify --output or --to")
         to = guess_format(output)
-
-    if device:
-        from .exporters.svg import set_device
-        set_device(device)
-    # If no device specified, defaults to RMPP (see device.py)
-    # Arbitary output size can be set with set_dimensions_for_pdf but this isn't
-    # exposed via the CLI yet.
-
     if from_ == "rm":
         with open_output(to, output) as fout:
             for fn in input:
