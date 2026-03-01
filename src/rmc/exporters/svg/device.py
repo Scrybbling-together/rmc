@@ -46,13 +46,6 @@ class SvgRenderConfig:
         config.update_from_device_profile(device)
         return config
 
-    @classmethod
-    def from_pdf_size(cls, width_pt: float, height_pt: float, dpi: int = 226) -> "SvgRenderConfig":
-        """Create config from PDF dimensions in points."""
-        config = cls.__new__(cls)
-        config.update_from_pdf_size(width_pt, height_pt, dpi)
-        return config
-
     def update_from_device_profile(self, device: str) -> None:
         """Update this config in-place from a device profile."""
         if device not in DEVICE_PROFILES:
@@ -96,69 +89,6 @@ def set_device(device: str) -> None:
 def get_device() -> str:
     """Get the current device profile name."""
     return rmc_config.device_name
-
-
-def detect_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
-    """
-    Detect the most likely device based on PDF page dimensions.
-
-    :param width_pt: PDF page width in points
-    :param height_pt: PDF page height in points
-    :return: Device name ('RM2' or 'RMPP')
-    """
-    best_device = "RMPP"
-    best_score = float('inf')
-
-    for device, profile in DEVICE_PROFILES.items():
-        scale = 72.0 / profile["dpi"]
-        expected_w = profile["width"] * scale
-        expected_h = profile["height"] * scale
-
-        # Calculate how close this device's dimensions are to the PDF
-        # Use ratio comparison to handle different aspect ratios
-        w_ratio = width_pt / expected_w
-        h_ratio = height_pt / expected_h
-
-        # Score based on how close ratios are to 1.0
-        score = abs(1 - w_ratio) + abs(1 - h_ratio)
-
-        if score < best_score:
-            best_score = score
-            best_device = device
-
-    _logger.debug(f"Detected device {best_device} for PDF size {width_pt}x{height_pt} pt (score={best_score:.3f})")
-    return best_device
-
-
-def set_device_from_pdf_size(width_pt: float, height_pt: float) -> str:
-    """
-    Detect and set the device profile based on PDF page dimensions.
-
-    :param width_pt: PDF page width in points
-    :param height_pt: PDF page height in points
-    :return: Device name that was set
-    """
-    device = detect_device_from_pdf_size(width_pt, height_pt)
-    set_device(device)
-    return device
-
-
-def set_custom_dimensions(width_screen: int, height_screen: int, dpi: int = 226) -> None:
-    """Set custom screen dimensions for non-standard PDF sizes.
-
-    This allows generating SVGs that match arbitrary PDF dimensions rather than
-    being constrained to fixed device profiles (RM2 or RMPP).
-
-    :param width_screen: Screen width in pixels
-    :param height_screen: Screen height in pixels
-    :param dpi: Screen DPI (default 226, same as RM2)
-    """
-    rmc_config.screen_width = width_screen
-    rmc_config.screen_height = height_screen
-    rmc_config.screen_dpi = dpi
-    rmc_config.device_name = "CUSTOM"
-    rmc_config._recompute_derived_fields()
-    _logger.debug(f"Set custom dimensions: {rmc_config.screen_width}x{rmc_config.screen_height} @ {rmc_config.screen_dpi} DPI")
 
 
 def set_dimensions_for_pdf(width_pt: float, height_pt: float, dpi: int = 226) -> None:
