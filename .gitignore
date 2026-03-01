@@ -1,3 +1,7 @@
 __pycache__/
 .idea
 data-tests/
+.DS_Store
+src/rmc/assets/fonts/reMarkableSans.woff2
+src/rmc/assets/fonts/reMarkableSerif.woff2
+src/rmc/assets/fonts/reMarkableSerifItalic.woff2

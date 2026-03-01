@@ -1,48 +1,69 @@
 # rmc
 
-Command line tool for converting to/from remarkable `.rm` version 6 (software version 3) files.
+Command line tool for converting to/from remarkable `.rm` version 6 (software
+version 3) files.
 
 ## Installation
 
-If you want to render your documents as PDF or SVG, you will need to install cairo.
-
-- On Windows, you need to install cairo using [msys2](https://packages.msys2.org/packages/mingw-w64-x86_64-gtk3)
-- On MacOS, install cairo using homebrew: `brew install cairo libxml2 libffi`
-- On Linux, the right packages should be installed through pip. If not, refer to [here](https://github.com/Kozea/CairoSVG/issues/371) for the right dependencies.
+If you want nice font rendering, you will need to install chrome/chromium (used
+to create svg/pdf with embedded fonts). Otherwise, rendering will fall back to
+using cairo. Chrome based rendering can also be turned off with `--no-chrome`.
 
 To install in your current Python environment:
 
     pip install rmc
     
-Or use [pipx](https://pypa.github.io/pipx/) to install in an isolated environment (recommended):
+Or use [pipx](https://pypa.github.io/pipx/) to install in an isolated
+environment (recommended):
 
     pipx install rmc
 
+To embed custom reMarkable fonts in the output, you will need to download them first:
+
+    cd ./src/rmc/assets/fonts/
+    ./download_remarkable_fonts.sh
+
 ## Usage
+
+Convert rm to pdf:
+
+    $ rmc file.rm -o file.pdf
+
+Convert rm to svg:
+
+    $ rmc file.rm -o file.svg
 
 Convert a remarkable v6 file to other formats, specified by `-t FORMAT`:
 
-    $ rmc -t markdown file.rm
-    Text in the file is printed to standard output.
-
-Specify the filename to write the output to with `-o`:
-
-    $ rmc -t svg -o file.svg file.rm
-    
-The format is guessed based on the filename if not specified:
-    
-    $ rmc file.rm -o file.pdf
+    $ rmc -t markdown file.rm -o file.md 
 
 Create a `.rm` file containing the text in `text.md`:
 
     $ rmc -t rm text.md -o text.rm
 
-## SVG/PDF Conversion Status
+```
+$ rmc --help
+Usage: rmc [OPTIONS] [INPUT]...
 
-Right now the converter works well while there are no text boxes. If you add text boxes, there are x issues:
+  Convert to/from reMarkable v6 files.
 
-1. if the text box contains multiple lines, the lines are actually printed in the same line, and
-2. the position of the strokes gets corrupted.
+  Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
+  `blocks`, `blocks-data`.
+
+  Formats `blocks` and `blocks-data` dump the internal structure of the `rm`
+  file, with and without detailed data values respectively.
+
+Options:
+  --version            Show the version and exit.
+  -v, --verbose
+  -f, --from FORMAT    Format to convert from (default: guess from filename)
+  -t, --to FORMAT      Format to convert to (default: guess from filename)
+  -o, --output PATH    Output filename (default: write to standard out)
+  --no-chrome          Use Cairo instead of Chrome for PDF conversion
+  --chrome-loc PATH    Path to Chrome/Chromium binary
+  --device [RM2|RMPP]  Device type (overrides auto-detection)
+  --help               Show this message and exit.
+```
 
 # Acknowledgements
 

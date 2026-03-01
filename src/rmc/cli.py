@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import click
 from rmscene import read_tree, read_blocks, write_blocks, simple_text_document
-from .exporters.svg import tree_to_svg
+from .exporters.svg import tree_to_svg, DEVICE_PROFILES
 from .exporters.pdf import svg_to_pdf
 from .exporters.markdown import print_text
 
@@ -20,8 +20,11 @@ import logging
 @click.option("-f", "--from", "from_", metavar="FORMAT", help="Format to convert from (default: guess from filename)")
 @click.option("-t", "--to", metavar="FORMAT", help="Format to convert to (default: guess from filename)")
 @click.option("-o", "--output", type=click.Path(), help="Output filename (default: write to standard out)")
+@click.option("--no-chrome", is_flag=True, help="Use Cairo instead of Chrome for PDF conversion")
+@click.option("--chrome-loc", type=click.Path(), help="Path to Chrome/Chromium binary")
+@click.option("--device", type=click.Choice(list(DEVICE_PROFILES.keys())), help="Device type (overrides auto-detection)")
 @click.argument("input", nargs=-1, type=click.Path(exists=True))
-def cli(verbose, from_, to, output, input):
+def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
     """Convert to/from reMarkable v6 files.
 
     Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
@@ -52,10 +55,17 @@ def cli(verbose, from_, to, output, input):
             raise click.UsageError("Must specify --output or --to")
         to = guess_format(output)
 
+    if device:
+        from .exporters.svg import set_device
+        set_device(device)
+    # If no device specified, defaults to RMPP (see device.py)
+    # Arbitary output size can be set with set_dimensions_for_pdf but this isn't
+    # exposed via the CLI yet.
+
     if from_ == "rm":
         with open_output(to, output) as fout:
             for fn in input:
-                convert_rm(Path(fn), to, fout)
+                convert_rm(Path(fn), to, fout, no_chrome=no_chrome, chrome_loc=chrome_loc)
     elif from_ == "markdown":
         text = "".join(
             Path(fn).read_text() for fn in input
@@ -116,7 +126,7 @@ def tree_structure(item):
         return item
 
 
-def convert_rm(filename: Path, to, fout):
+def convert_rm(filename: Path, to, fout, no_chrome=False, chrome_loc=None):
     with open(filename, "rb") as f:
         if to == "blocks":
             pprint_blocks(f, fout)
@@ -138,7 +148,7 @@ def convert_rm(filename: Path, to, fout):
             tree = read_tree(f)
             tree_to_svg(tree, buf)
             buf.seek(0)
-            svg_to_pdf(buf, fout)
+            svg_to_pdf(buf, fout, use_chrome=not no_chrome, chrome_loc=chrome_loc)
         else:
             raise click.UsageError("Unknown format %s" % to)
 
