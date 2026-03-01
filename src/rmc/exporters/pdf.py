@@ -145,7 +145,7 @@ def _svg_to_pdf(svg_data: str, pdf_file: Path, use_chrome: bool = True, chrome_l
     # Only use Chrome if requested and SVG contains fonts
     has_fonts = 'font-family' in svg_data or '@font-face' in svg_data
 
-    if use_chrome and has_fonts:
+    if use_chrome and has_fonts and find_chrome(chrome_loc):
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as temp_svg:
             temp_svg.write(svg_data)
             temp_svg.flush()
@@ -155,6 +155,8 @@ def _svg_to_pdf(svg_data: str, pdf_file: Path, use_chrome: bool = True, chrome_l
         finally:
             Path(temp_svg_path).unlink(missing_ok=True)
     else:
+        if use_chrome and has_fonts:
+            _logger.warning("Chrome/Chromium not found, falling back to Cairo for PDF conversion")
         # Use Cairo - extract dimensions from SVG to ensure correct output size
         width_match = re.search(r'width="([0-9.]+)"', svg_data)
         height_match = re.search(r'height="([0-9.]+)"', svg_data)
