@@ -7,8 +7,6 @@ This module provides functions to convert .rm files to SVG format.
 from .device import (
     set_device,
     get_device,
-    set_device_from_pdf_size,
-    set_custom_dimensions,
     set_dimensions_for_pdf,
     DEVICE_PROFILES,
     SvgRenderConfig,
@@ -35,8 +33,6 @@ __all__ = [
     'tree_to_svg',
     'set_device',
     'get_device',
-    'set_device_from_pdf_size',
-    'set_custom_dimensions',
     'set_dimensions_for_pdf',
     'build_anchor_pos',
     'get_bounding_box',
