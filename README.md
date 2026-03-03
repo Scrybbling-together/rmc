@@ -18,10 +18,18 @@ environment (recommended):
 
     pipx install rmc
 
-To embed custom reMarkable fonts in the output, you will need to download them first:
+To use reMarkable's custom fonts (optional, for more accurate text rendering):
 
-    cd ./src/rmc/assets/fonts/
     ./download_remarkable_fonts.sh
+
+Then run rmc with the option `--fonts-dir fonts/` to use these fonts.
+
+This downloads the following files into `fonts/`:
+- `reMarkableSans.woff2`
+- `reMarkableSerif.woff2`
+- `reMarkableSerifItalic.woff2`
+
+Without these fonts, rmc uses bundled open-source alternatives (Noto Sans, EB Garamond).
 
 ## Usage
 
@@ -61,6 +69,7 @@ Options:
   -o, --output PATH    Output filename (default: write to standard out)
   --no-chrome          Use Cairo instead of Chrome for PDF conversion
   --chrome-loc PATH    Path to Chrome/Chromium binary
+  --fonts-dir PATH     Directory containing reMarkable font files
   --device [RM2|RMPP]  Device type (overrides auto-detection)
   --help               Show this message and exit.
 ```
