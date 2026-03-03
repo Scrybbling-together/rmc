@@ -17,7 +17,6 @@ from .device import rmc_config
 # Import from fonts module
 from .fonts import (
     FONTS,
-    FONTS_DIR,
     FONT_CONFIG,
     FONT_WEIGHT_INLINE_BOLD,
     FONT_FAMILY_SANS,
@@ -204,7 +203,7 @@ def _load_font_data() -> tp.Dict[str, tp.Dict[str, tp.Any]]:
         resolved = _resolve_font_config(font_key)
         if resolved is None:
             continue
-        font_path = FONTS_DIR / resolved["file"]
+        font_path = resolved["path"]
         try:
             font_data = font_path.read_bytes()
             _font_data_cache[font_key] = {

@@ -92,33 +92,55 @@ FONTS = {
 }
 
 
+def _get_font_path(filename: str) -> tp.Optional[Path]:
+    """Find a font file, checking external fonts_dir first, then bundled FONTS_DIR.
+
+    :param filename: Font filename to look for
+    :return: Full path to font file, or None if not found
+    """
+    # Check external fonts directory first
+    if device.rmc_config.fonts_dir is not None:
+        external_path = device.rmc_config.fonts_dir / filename
+        if external_path.exists():
+            return external_path
+
+    # Fall back to bundled fonts directory
+    bundled_path = FONTS_DIR / filename
+    if bundled_path.exists():
+        return bundled_path
+
+    return None
+
+
 def _resolve_font_config(font_key: str) -> tp.Optional[dict]:
     """Resolve font config, falling back if primary font file doesn't exist."""
     font_config = FONTS.get(font_key)
     if font_config is None:
         return None
 
-    primary_path = FONTS_DIR / font_config["file"]
-    if primary_path.exists():
+    primary_path = _get_font_path(font_config["file"])
+    if primary_path is not None:
         return {
             "file": font_config["file"],
             "family": font_config["family"],
             "style": font_config["style"],
             "weight_range": font_config["weight_range"],
             "format": font_config.get("format", "woff2"),
+            "path": primary_path,
         }
 
     # Try fallback
     fallback = font_config.get("fallback")
     if fallback:
-        fallback_path = FONTS_DIR / fallback["file"]
-        if fallback_path.exists():
+        fallback_path = _get_font_path(fallback["file"])
+        if fallback_path is not None:
             return {
                 "file": fallback["file"],
                 "family": fallback["family"],
                 "style": font_config["style"],  # inherit style from primary
                 "weight_range": fallback["weight_range"],
                 "format": fallback["format"],
+                "path": fallback_path,
             }
 
     return None
@@ -277,7 +299,7 @@ def _load_font_metrics():
         resolved = _resolve_font_config(font_key)
         if resolved is None:
             continue
-        font_path = FONTS_DIR / resolved["file"]
+        font_path = resolved["path"]
         try:
             font = TTFont(font_path)
             _font_metrics[font_key] = {
@@ -286,7 +308,7 @@ def _load_font_metrics():
                 'upem': font['head'].unitsPerEm,
             }
         except Exception as e:
-            _logger.warning(f"Failed to load {font_key} font from {resolved['file']}: {e}")
+            _logger.warning(f"Failed to load {font_key} font from {font_path}: {e}")
 
     return _font_metrics
 

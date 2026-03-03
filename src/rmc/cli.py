@@ -22,9 +22,10 @@ import logging
 @click.option("-o", "--output", type=click.Path(), help="Output filename (default: write to standard out)")
 @click.option("--no-chrome", is_flag=True, help="Use Cairo instead of Chrome for PDF conversion")
 @click.option("--chrome-loc", type=click.Path(), help="Path to Chrome/Chromium binary")
+@click.option("--fonts-dir", type=click.Path(exists=True, file_okay=False), help="Directory containing reMarkable font files (reMarkableSans.woff2, reMarkableSerif.woff2, reMarkableSerifItalic.woff2). Overrides bundled open-source fallback fonts.")
 @click.option("--device", type=click.Choice(list(DEVICE_PROFILES.keys())), help="Device type (overrides auto-detection)")
 @click.argument("input", nargs=-1, type=click.Path(exists=True))
-def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
+def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, fonts_dir, device):
     """Convert to/from reMarkable v6 files.
 
     Available FORMATs are: `rm` (reMarkable file), `markdown`, `svg`, `pdf`,
@@ -54,6 +55,10 @@ def cli(verbose, from_, to, output, input, no_chrome, chrome_loc, device):
         if output is None:
             raise click.UsageError("Must specify --output or --to")
         to = guess_format(output)
+
+    if fonts_dir:
+        from .exporters.svg import set_fonts_dir
+        set_fonts_dir(Path(fonts_dir))
 
     if device:
         from .exporters.svg import set_device

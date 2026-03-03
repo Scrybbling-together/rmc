@@ -2,6 +2,8 @@
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
 
 _logger = logging.getLogger(__name__)
 
@@ -21,6 +23,9 @@ class SvgRenderConfig:
     screen_height: int         # Device screen height in pixels
     screen_dpi: int            # Device DPI (dots per inch)
     device_name: str = "CUSTOM"  # "RM2", "RMPP", or "CUSTOM"
+
+    # Optional external fonts directory (checked before bundled fonts)
+    fonts_dir: Optional[Path] = None
 
     # Computed scaling factors (auto-calculated in __post_init__)
     scale: float = field(init=False)           # 72.0 / DPI
@@ -109,3 +114,12 @@ def set_dimensions_for_pdf(width_pt: float, height_pt: float, dpi: int = 226) ->
     :param dpi: DPI to use for conversion (default 226, same as RM2)
     """
     rmc_config.update_from_pdf_size(width_pt, height_pt, dpi)
+
+
+def set_fonts_dir(path: Path) -> None:
+    """Set an external fonts directory to check before bundled fonts.
+
+    :param path: Path to directory containing font files
+    """
+    rmc_config.fonts_dir = Path(path)
+    _logger.debug(f"Set external fonts directory: {rmc_config.fonts_dir}")
