@@ -21,7 +21,8 @@ environment (recommended):
 To use reMarkable's custom fonts (optional, for more accurate text rendering):
 
     ./download_remarkable_fonts.sh
-    rmc file.rm -o file.pdf --fonts-dir fonts/
+
+Then run rmc with the option `--fonts-dir fonts/` to use these fonts.
 
 This downloads the following files into `fonts/`:
 - `reMarkableSans.woff2`
