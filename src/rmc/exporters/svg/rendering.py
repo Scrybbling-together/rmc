@@ -32,6 +32,7 @@ from .layout import (
     build_anchor_pos,
     get_anchor,
     get_bounding_box,
+    device_scaled_wrap_width,
 )
 
 # Import from paragraph_styles module
@@ -410,7 +411,7 @@ def draw_text(text: si.Text, output):
             needs_tspans = any(part['bold'] or part['italic'] for part in line_parts)
             
             # Apply word wrapping based on available width
-            available_width = text.width - TEXT_WRAP_MARGIN
+            available_width = device_scaled_wrap_width(text)
             available_width -= style_config.width_reduction(rmc_config.scale)
             
             if needs_tspans:
