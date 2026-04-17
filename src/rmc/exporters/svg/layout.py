@@ -24,6 +24,17 @@ _logger = logging.getLogger(__name__)
 TEXT_DOCUMENT_TOP_Y_CRDT_ID = 0xfffffffffffe
 TEXT_DOCUMENT_BOTTOM_Y_CRDT_ID = 0xffffffffffff
 
+# text.width in .rm files is stored in RMPP screen units (1620 wide).
+# When rendering on a narrower device like RM2 (1404 wide), we scale the
+# wrap width by screen_width / RMPP_WIDTH so lines wrap proportionally
+# to the target canvas instead of overflowing it.
+RMPP_WIDTH = 1620
+
+
+def device_scaled_wrap_width(text: si.Text) -> float:
+    ratio = device.rmc_config.screen_width / RMPP_WIDTH
+    return (text.width - TEXT_WRAP_MARGIN) * ratio
+
 
 class ParagraphLayoutInfo(tp.TypedDict):
     """Layout information for a single paragraph, calculated during text flow."""
@@ -118,7 +129,7 @@ def calculate_paragraph_layouts(
             y_offset += num_soft_breaks * soft_line_height
 
         # Calculate available width - use style_config.width_reduction()
-        available_width = text.width - TEXT_WRAP_MARGIN
+        available_width = device_scaled_wrap_width(text)
         available_width -= style_config.width_reduction(device.rmc_config.scale)
 
         # Calculate word wrapping
