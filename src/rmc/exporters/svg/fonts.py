@@ -331,8 +331,11 @@ def get_text_width_screen(text: str, style: si.ParagraphStyle) -> float:
 
 def wrap_text_to_width(text: str, max_width: float, style: si.ParagraphStyle) -> tp.List[str]:
     """
-    Wrap text to fit within max_width, breaking at word boundaries.
-    Preserves leading whitespace on the first line.
+    Wrap text to fit within max_width.
+
+    This prefers breaking at whitespace, but falls back to hard-wrapping long
+    tokens when a single word or tab-delimited run exceeds the available width.
+    Leading whitespace on the first rendered line is preserved.
 
     :param text: The text to wrap
     :param max_width: Maximum width in screen units
@@ -342,52 +345,102 @@ def wrap_text_to_width(text: str, max_width: float, style: si.ParagraphStyle) ->
     if not text:
         return ['']
 
-    # Preserve leading whitespace
-    leading_spaces = ''
-    stripped_text = text.lstrip(' ')
-    if len(stripped_text) < len(text):
-        leading_spaces = text[:len(text) - len(stripped_text)]
+    def char_width(ch: str) -> float:
+        if ch == '	':
+            return get_char_width_screen(' ', style)
+        return get_char_width_screen(ch, style)
 
-    # Now wrap the stripped text
-    words = stripped_text.split(' ')
-    lines = []
+    def token_width(token: str) -> float:
+        return sum(char_width(ch) for ch in token)
+
+    def hard_wrap_token(token: str) -> tp.List[str]:
+        if not token:
+            return ['']
+
+        parts: tp.List[str] = []
+        current = ''
+        current_width = 0.0
+        for ch in token:
+            ch_width = char_width(ch)
+            if current and current_width + ch_width > max_width:
+                parts.append(current)
+                current = ch
+                current_width = ch_width
+            else:
+                current += ch
+                current_width += ch_width
+        if current:
+            parts.append(current)
+        return parts or ['']
+
+    tokens = []
+    current = text[0]
+    current_is_space = text[0].isspace()
+    for ch in text[1:]:
+        is_space = ch.isspace()
+        if is_space == current_is_space:
+            current += ch
+        else:
+            tokens.append((current, current_is_space))
+            current = ch
+            current_is_space = is_space
+    tokens.append((current, current_is_space))
+
+    lines: tp.List[str] = []
     current_line = ''
     current_width = 0.0
-    space_width = get_char_width_screen(' ', style)
 
-    # Account for leading spaces in the first line's width
-    leading_width = get_text_width_screen(leading_spaces, style) if leading_spaces else 0.0
-    first_line = True
+    for token, is_space in tokens:
+        width = token_width(token)
 
-    for word in words:
-        if not word:  # Skip empty strings from consecutive spaces
+        # Already filling a line, and token fits on same line
+        if current_line and current_width + width <= max_width:
+            current_line += token
+            current_width += width
             continue
 
-        word_width = get_text_width_screen(word, style)
+        # Line is empty and token fits - create a new line 
+        if not current_line and width <= max_width:
+            current_line = token
+            current_width = width
+            continue
 
+        # At this point - token is overflowing (not enough width left to fit it
+        #   on current line)
+
+        # Overflowing token is whitespace
+        if is_space:
+            if current_line:
+                # If line exists, finalise it and strip the rest of the
+                # whitespace
+                lines.append(current_line.rstrip())
+                current_line = ''
+                current_width = 0.0
+            else:
+                # If line doesn't exist, keep the starting whitespace.
+                current_line = token
+                current_width = width
+            continue
+
+        # At this point, a non-whitespace token overflowed. First finalise
+        #   current line.
         if current_line:
-            # Check if adding this word (with space) would exceed width
-            test_width = current_width + space_width + word_width
-            if test_width <= max_width:
-                current_line += ' ' + word
-                current_width = test_width
-            else:
-                # Start new line
-                lines.append(current_line)
-                current_line = word
-                current_width = word_width
-                first_line = False
-        else:
-            # First word on line
-            if first_line and leading_spaces:
-                current_line = leading_spaces + word
-                current_width = leading_width + word_width
-            else:
-                current_line = word
-                current_width = word_width
+            lines.append(current_line.rstrip())
+            current_line = ''
+            current_width = 0.0
 
-    # Don't forget the last line
+        # Final fallback: token is too wide, split into chunks that fit into
+        # the line width
+        wrapped_parts = hard_wrap_token(token)
+        for part_idx, part in enumerate(wrapped_parts):
+            part_width = token_width(part)
+            if part_idx < len(wrapped_parts) - 1:
+                lines.append(part)
+            else:
+                current_line = part
+                current_width = part_width
+
     if current_line:
-        lines.append(current_line)
+        lines.append(current_line.rstrip())
 
     return lines if lines else ['']

@@ -302,28 +302,29 @@ def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
                     current_soft_offset += soft_line_height
                     cumulative_x = 0.0
                     current_word_start_x = 0.0
-                elif char == ' ':
-                    # Space - finalize current word and check if next word needs to wrap
+                elif char.isspace():
+                    # Whitespace other than LINE_SEPARATOR acts as a wrap opportunity.
+                    # Tabs are measured like a single space to match text rendering.
                     for word_k, word_char in current_word_chars:
                         anchor_pos[word_k] = ypos + current_soft_offset
                     current_word_chars = []
-                    
+
                     anchor_pos[k] = ypos + current_soft_offset
                     anchor_x_pos[k] = text.pos_x + cumulative_x
                     anchor_soft_offset[k] = current_soft_offset
-                    
-                    cumulative_x += fonts.get_char_width_screen(char, p.style.value)
+
+                    whitespace_width = fonts.get_char_width_screen(' ', p.style.value) if char == '	' else fonts.get_char_width_screen(char, p.style.value)
+                    cumulative_x += whitespace_width
                     current_word_start_x = cumulative_x
                 else:
                     # Regular character - add to current word
                     char_width = fonts.get_char_width_screen(char, p.style.value)
-                    
-                    # Check if adding this character would exceed the line width
-                    # If so, wrap the entire current word to the next line
+
+                    # Check if adding this character would exceed the line width.
+                    # If the word started after some whitespace, wrap the whole word.
                     if cumulative_x + char_width > available_width and current_word_start_x > 0:
-                        # Wrap: move to next line
                         current_soft_offset += soft_line_height
-                        
+
                         # Recalculate X positions for current word on new line
                         new_x = 0.0
                         for word_k, word_char in current_word_chars:
@@ -331,10 +332,18 @@ def build_anchor_pos(text: tp.Optional[si.Text], extended: bool = False):
                             anchor_pos[word_k] = ypos + current_soft_offset
                             anchor_soft_offset[word_k] = current_soft_offset
                             new_x += fonts.get_char_width_screen(word_char, p.style.value)
-                        
+
                         cumulative_x = new_x
                         current_word_start_x = 0.0
-                    
+                    elif cumulative_x + char_width > available_width and current_word_chars:
+                        # Long token at the start of a line: hard-wrap within the token.
+                        for word_k, word_char in current_word_chars:
+                            anchor_pos[word_k] = ypos + current_soft_offset
+                        current_word_chars = []
+                        current_soft_offset += soft_line_height
+                        cumulative_x = 0.0
+                        current_word_start_x = 0.0
+
                     # Add this character
                     anchor_x_pos[k] = text.pos_x + cumulative_x
                     anchor_soft_offset[k] = current_soft_offset
