@@ -5,6 +5,7 @@ https://github.com/chemag/maxio .
 """
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -17,6 +18,11 @@ from cairosvg import svg2pdf
 from .svg import rm_to_svg
 
 _logger = logging.getLogger(__name__)
+
+# Optional override for where temporary files are written. Defaults to None, i.e. the
+# system temp dir (which already honors $TMPDIR). Lets callers (e.g. a hardened,
+# read-only-root container) point temp at a writable volume.
+REMARKS_TEMP_DIR = os.getenv("REMARKS_TEMP_DIR") or None
 
 # Chrome/Chromium command names to search in PATH
 CHROME_COMMANDS = [
@@ -118,7 +124,7 @@ def chrome_svg_to_pdf(svg_path: str, pdf_path: str, chrome_loc: Optional[str] = 
 </body>
 </html>'''
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(dir=REMARKS_TEMP_DIR) as tmpdir:
         html_path = Path(tmpdir) / "temp.html"
         html_path.write_text(html_content)
 
@@ -146,7 +152,7 @@ def _svg_to_pdf(svg_data: str, pdf_file: Path, use_chrome: bool = True, chrome_l
     has_fonts = 'font-family' in svg_data or '@font-face' in svg_data
 
     if use_chrome and has_fonts and find_chrome(chrome_loc):
-        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as temp_svg:
+        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False, dir=REMARKS_TEMP_DIR) as temp_svg:
             temp_svg.write(svg_data)
             temp_svg.flush()
             temp_svg_path = temp_svg.name
@@ -191,7 +197,7 @@ def rm_to_pdf(rm_path, pdf_path, use_chrome: bool = True, chrome_loc: Optional[s
     :param use_chrome: If True, use Chrome when fonts are present; if False, always use Cairo
     :param chrome_loc: Optional explicit path to Chrome binary
     """
-    with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False) as f_temp:
+    with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=False, dir=REMARKS_TEMP_DIR) as f_temp:
         rm_to_svg(rm_path, f_temp.name)
         temp_svg_path = f_temp.name
 
